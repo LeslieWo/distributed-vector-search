@@ -1,6 +1,9 @@
 dependencies {
     implementation 'com.github.jelmerk:hnswlib-core:1.2.1'
     implementation 'io.grpc:grpc-netty-shaded:1.76.0'
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+    implementation 'org.springframework.boot:spring-boot-starter-actuator'
+    runtimeOnly 'io.micrometer:micrometer-registry-prometheus'
     testImplementation 'io.grpc:grpc-inprocess:1.76.0'
     testImplementation project(':embedding')
 }

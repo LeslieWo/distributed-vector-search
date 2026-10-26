@@ -2,6 +2,8 @@ package dev.vectorsearch.shardnode.grpc;
 
 import io.grpc.BindableService;
 import io.grpc.Server;
+import io.grpc.ServerInterceptor;
+import io.grpc.ServerInterceptors;
 import io.grpc.netty.shaded.io.grpc.netty.NettyServerBuilder;
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -23,13 +25,19 @@ public class GrpcServerLifecycle implements SmartLifecycle {
     private final int port;
     private final int threads;
     private final List<BindableService> services;
+    private final List<ServerInterceptor> interceptors;
     private volatile Server server;
     private ExecutorService executor;
 
     public GrpcServerLifecycle(int port, int threads, List<BindableService> services) {
+        this(port, threads, services, List.of());
+    }
+
+    public GrpcServerLifecycle(int port, int threads, List<BindableService> services, List<ServerInterceptor> interceptors) {
         this.port = port;
         this.threads = threads;
         this.services = services;
+        this.interceptors = interceptors;
     }
 
     @Override
@@ -37,7 +45,7 @@ public class GrpcServerLifecycle implements SmartLifecycle {
         // Fixed pool: bounded concurrency instead of one thread per request under overload.
         executor = Executors.newFixedThreadPool(threads, Thread.ofPlatform().name("grpc-shard-", 0).factory());
         NettyServerBuilder b = NettyServerBuilder.forPort(port).executor(executor).maxInboundMessageSize(32 * 1024 * 1024);
-        services.forEach(b::addService);
+        services.forEach(svc -> b.addService(ServerInterceptors.intercept(svc, interceptors)));
         try {
             server = b.build().start();
         } catch (IOException e) {

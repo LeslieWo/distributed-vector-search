@@ -2,8 +2,11 @@ package dev.vectorsearch.shardnode;
 
 import dev.vectorsearch.shardnode.grpc.GrpcServerLifecycle;
 import dev.vectorsearch.shardnode.grpc.ShardGrpcService;
+import dev.vectorsearch.shardnode.metrics.GrpcMetricsInterceptor;
+import dev.vectorsearch.shardnode.metrics.ShardMetrics;
 import dev.vectorsearch.shardnode.store.PartitionStore;
 import dev.vectorsearch.shardnode.store.PersistentPartitionStore;
+import io.micrometer.core.instrument.MeterRegistry;
 import java.util.List;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
@@ -24,12 +27,18 @@ public class ShardNodeApplication {
     }
 
     @Bean
-    ShardGrpcService shardGrpcService(PartitionStore store) {
-        return new ShardGrpcService(store);
+    ShardMetrics shardMetrics(MeterRegistry registry, PersistentPartitionStore store) {
+        return new ShardMetrics(registry, store);
     }
 
     @Bean
-    GrpcServerLifecycle grpcServer(ShardNodeProperties props, ShardGrpcService service) {
-        return new GrpcServerLifecycle(props.grpcPort(), props.grpcThreads(), List.of(service));
+    ShardGrpcService shardGrpcService(PartitionStore store, ShardMetrics metrics) {
+        return new ShardGrpcService(store, metrics::recordUpserted);
+    }
+
+    @Bean
+    GrpcServerLifecycle grpcServer(ShardNodeProperties props, ShardGrpcService service, MeterRegistry registry) {
+        return new GrpcServerLifecycle(props.grpcPort(), props.grpcThreads(), List.of(service),
+                List.of(new GrpcMetricsInterceptor(registry)));
     }
 }

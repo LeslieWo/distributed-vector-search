@@ -18,6 +18,7 @@ import io.grpc.StatusRuntimeException;
 import io.grpc.stub.StreamObserver;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.IntConsumer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -29,9 +30,16 @@ public class ShardGrpcService extends ShardServiceGrpc.ShardServiceImplBase {
     private final String nodeId;
     private final int dimension;
     private final int maxK;
+    private final IntConsumer onUpserted;
 
     public ShardGrpcService(PartitionStore store) {
+        this(store, n -> {});
+    }
+
+    /** @param onUpserted told how many chunks each successful Upsert applied (metrics hook) */
+    public ShardGrpcService(PartitionStore store, IntConsumer onUpserted) {
         this.store = store;
+        this.onUpserted = onUpserted;
         this.nodeId = store.properties().nodeId();
         this.dimension = store.properties().dimension();
         this.maxK = store.properties().maxK();
@@ -65,7 +73,9 @@ public class ShardGrpcService extends ShardServiceGrpc.ShardServiceImplBase {
                 if (c.getChunkId().isBlank()) throw invalid("blank chunk_id");
                 entries.add(new PartitionStore.Entry(c.getChunkId(), c.getPartition(), toArray(c.getVectorList(), c.getChunkId()), c.getText()));
             }
-            return UpsertResponse.newBuilder().setUpserted(store.upsert(entries)).build();
+            int n = store.upsert(entries);
+            onUpserted.accept(n);
+            return UpsertResponse.newBuilder().setUpserted(n).build();
         });
     }
 
