@@ -1,0 +1,18 @@
+dependencies {
+    testImplementation project(':embedding')
+}
+
+// Dev tools in src/test/java/.../bench, run with e.g. ./gradlew :shard-node:embedSubset
+def benchTask = { String taskName, String mainClassName, String desc ->
+    tasks.register(taskName, JavaExec) {
+        description = desc
+        group = 'bench'
+        classpath = sourceSets.test.runtimeClasspath
+        mainClass = "dev.vectorsearch.shardnode.bench.${mainClassName}"
+        workingDir = rootDir
+        jvmArgs '-Xmx6g'
+        if (project.hasProperty('args')) args project.property('args').split(' ')
+    }
+}
+benchTask('embedSubset', 'EmbedSubset', 'Embeds the first N chunks + Q dev queries into data/vectors')
+benchTask('groundTruth', 'GroundTruth', 'Exact top-100 per query by brute force, written to data/vectors')
