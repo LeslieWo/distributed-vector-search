@@ -1,3 +1,16 @@
+dependencies {
+    // Same dependency versions as the Spring Boot apps (kafka-clients, Testcontainers, ...).
+    implementation platform('org.springframework.boot:spring-boot-dependencies:3.5.6')
+    testImplementation platform('org.springframework.boot:spring-boot-dependencies:3.5.6')
+    // Boot 3.5.6 pins Testcontainers 1.21.3, whose docker-java speaks API 1.32; Docker 29 (colima) rejects < 1.40.
+    testImplementation enforcedPlatform('org.testcontainers:testcontainers-bom:1.21.4')
+
+    testImplementation 'org.testcontainers:junit-jupiter'
+    testImplementation 'org.testcontainers:kafka'
+    testImplementation 'org.apache.kafka:kafka-clients'
+    testRuntimeOnly 'org.slf4j:slf4j-simple'
+}
+
 tasks.register('chunkStats', JavaExec) {
     description = 'Chunks data/msmarco/collection.2M.tsv and prints counts'
     classpath = sourceSets.main.runtimeClasspath

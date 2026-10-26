@@ -11,8 +11,11 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.io.TempDir;
 
+// One unexplained 303 s stall was seen once (BUILDLOG step 12); fail fast instead of hanging the build.
+@Timeout(30)
 class PersistentPartitionStoreTest {
     @TempDir
     Path dir;

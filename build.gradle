@@ -23,13 +23,24 @@ subprojects {
         testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
     }
 
-    tasks.withType(Test).configureEach { useJUnitPlatform() }
+    tasks.withType(Test).configureEach {
+        useJUnitPlatform()
+        // Testcontainers + colima: point at colima's socket unless DOCKER_HOST is already set.
+        // The socket path *inside* the VM is still /var/run/docker.sock (used to mount it into Ryuk).
+        def colimaSocket = file("${System.getProperty('user.home')}/.colima/default/docker.sock")
+        if (!System.getenv('DOCKER_HOST') && colimaSocket.exists()) {
+            environment 'DOCKER_HOST', "unix://${colimaSocket}"
+            environment 'TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE', '/var/run/docker.sock'
+        }
+    }
 
     if (name in libraryModules) {
         apply plugin: 'java-library'
     } else {
         apply plugin: 'org.springframework.boot'
         apply plugin: 'io.spring.dependency-management'
+        // Boot 3.5.6 pins Testcontainers 1.21.3 (docker-java API 1.32); Docker 29 under colima needs >= 1.40.
+        ext['testcontainers.version'] = '1.21.4'
         dependencies {
             implementation project(':common')
             implementation project(':proto')
