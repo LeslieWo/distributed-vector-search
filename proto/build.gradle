@@ -1,0 +1,27 @@
+plugins {
+    id 'com.google.protobuf' version '0.9.5'
+}
+
+// grpc-protobuf 1.76.0 itself depends on protobuf-java 3.25.8, so protoc and the runtime
+// are pinned to that exact version to keep generated code and runtime in lockstep.
+def grpcVersion = '1.76.0'
+def protobufVersion = '3.25.8'
+
+dependencies {
+    api "io.grpc:grpc-protobuf:${grpcVersion}"
+    api "io.grpc:grpc-stub:${grpcVersion}"
+    api "com.google.protobuf:protobuf-java:${protobufVersion}"
+    compileOnly 'org.apache.tomcat:annotations-api:6.0.53' // @Generated on grpc stubs
+
+    testImplementation "io.grpc:grpc-inprocess:${grpcVersion}"
+}
+
+protobuf {
+    protoc { artifact = "com.google.protobuf:protoc:${protobufVersion}" }
+    plugins {
+        grpc { artifact = "io.grpc:protoc-gen-grpc-java:${grpcVersion}" }
+    }
+    generateProtoTasks {
+        all()*.plugins { grpc {} }
+    }
+}

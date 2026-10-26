@@ -1,0 +1,98 @@
+syntax = "proto3";
+
+package vectorsearch.v1;
+
+option java_multiple_files = true;
+option java_package = "dev.vectorsearch.proto.v1";
+option java_outer_classname = "VectorSearchProto";
+
+// All RPCs are unary on purpose: per-call deadlines and hedged requests (Phase 4)
+// are simple to reason about when one request maps to exactly one response.
+
+// ---------- Shard node: holds one HNSW index per partition ----------
+
+service ShardService {
+  rpc Search(ShardSearchRequest) returns (ShardSearchResponse);
+  rpc Upsert(UpsertRequest) returns (UpsertResponse);
+  rpc Delete(DeleteRequest) returns (DeleteResponse);
+  rpc Health(HealthRequest) returns (HealthResponse);
+}
+
+message ShardSearchRequest {
+  // Partition = id of the primary node that owns this slice of the ring.
+  string partition = 1;
+  // L2-normalized query embedding (384 floats for all-MiniLM-L6-v2).
+  repeated float vector = 2 [packed = true];
+  int32 k = 3;
+  // efSearch override; 0 = use the node's default.
+  int32 ef = 4;
+}
+
+message ShardSearchResponse {
+  repeated ScoredChunk hits = 1;
+  // Size of the searched partition, handy for debugging and metrics.
+  int64 partition_size = 2;
+}
+
+message ScoredChunk {
+  string chunk_id = 1;
+  // Cosine similarity in [-1, 1]; higher is better.
+  float score = 2;
+  string text = 3;
+}
+
+message ChunkVector {
+  string chunk_id = 1;
+  string partition = 2;
+  repeated float vector = 3 [packed = true];
+  string text = 4;
+}
+
+message UpsertRequest {
+  repeated ChunkVector chunks = 1;
+}
+
+message UpsertResponse {
+  // Number of chunks applied. Re-sending the same chunk id overwrites it (idempotent).
+  int32 upserted = 1;
+}
+
+message DeleteRequest {
+  string partition = 1;
+  repeated string chunk_ids = 2;
+}
+
+message DeleteResponse {
+  int32 deleted = 1;
+}
+
+message HealthRequest {}
+
+message HealthResponse {
+  enum Status {
+    STATUS_UNSPECIFIED = 0;
+    SERVING = 1;
+    NOT_SERVING = 2;
+  }
+  Status status = 1;
+  string node_id = 2;
+  // partition -> number of vectors stored for it
+  map<string, int64> partition_sizes = 3;
+}
+
+// ---------- Coordinator: the public query API ----------
+
+service SearchService {
+  rpc Search(SearchRequest) returns (SearchResponse);
+}
+
+message SearchRequest {
+  string text = 1;
+  int32 k = 2;
+}
+
+message SearchResponse {
+  repeated ScoredChunk hits = 1;
+  // True when at least one partition could not be searched (Phase 4 partial results).
+  bool partial = 2;
+}
