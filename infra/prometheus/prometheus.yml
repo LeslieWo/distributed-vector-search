@@ -1,0 +1,16 @@
+global:
+  scrape_interval: 5s
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
+  # App services expose /actuator/prometheus from step 11 on.
+  - job_name: vector-search
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets:
+          - host.docker.internal:8081   # shard-node-1
+          - host.docker.internal:8082   # shard-node-2
+          - host.docker.internal:8083   # shard-node-3
+          - host.docker.internal:8090   # coordinator
