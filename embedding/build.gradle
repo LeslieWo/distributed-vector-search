@@ -1,0 +1,19 @@
+dependencies {
+    api 'com.microsoft.onnxruntime:onnxruntime:1.29.0'
+    implementation 'ai.djl.huggingface:tokenizers:0.37.0'
+    implementation 'org.slf4j:slf4j-api:2.0.17'
+    testRuntimeOnly 'org.slf4j:slf4j-simple:2.0.17'
+}
+
+// Model files live in data/models (gitignored, fetched by scripts/fetch-data.sh).
+tasks.withType(Test).configureEach {
+    systemProperty 'vs.modelDir', "${rootDir}/data/models/all-MiniLM-L6-v2"
+}
+
+tasks.register('embedBench', JavaExec) {
+    description = 'Measures embedding throughput (sentences/sec) at several batch sizes'
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'dev.vectorsearch.embedding.EmbedBench'
+    workingDir = rootDir
+    jvmArgs '-Xmx2g'
+}
