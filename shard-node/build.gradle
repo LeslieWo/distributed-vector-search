@@ -17,3 +17,4 @@ def benchTask = { String taskName, String mainClassName, String desc ->
 }
 benchTask('embedSubset', 'EmbedSubset', 'Embeds the first N chunks + Q dev queries into data/vectors')
 benchTask('groundTruth', 'GroundTruth', 'Exact top-100 per query by brute force, written to data/vectors')
+benchTask('hnswSweep', 'HnswSweep', 'recall@10 vs latency over efSearch for several M values')

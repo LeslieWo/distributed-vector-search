@@ -23,7 +23,7 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
  */
 public final class HnswVectorIndex implements VectorIndex {
     public record Params(int m, int efConstruction, int efSearch) {
-        public static final Params DEFAULT = new Params(16, 200, 64);
+        public static final Params DEFAULT = new Params(16, 200, 80);
     }
 
     private final HnswIndex<String, float[], ChunkItem, Float> index;
