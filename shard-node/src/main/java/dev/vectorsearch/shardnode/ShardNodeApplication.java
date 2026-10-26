@@ -3,6 +3,7 @@ package dev.vectorsearch.shardnode;
 import dev.vectorsearch.shardnode.grpc.GrpcServerLifecycle;
 import dev.vectorsearch.shardnode.grpc.ShardGrpcService;
 import dev.vectorsearch.shardnode.store.PartitionStore;
+import dev.vectorsearch.shardnode.store.PersistentPartitionStore;
 import java.util.List;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
@@ -16,9 +17,10 @@ public class ShardNodeApplication {
         SpringApplication.run(ShardNodeApplication.class, args);
     }
 
+    /** Restores snapshots + WAL in its constructor, before the gRPC server starts; closed after it stops. */
     @Bean
-    PartitionStore partitionStore(ShardNodeProperties props) {
-        return new PartitionStore(props);
+    PersistentPartitionStore partitionStore(ShardNodeProperties props) {
+        return new PersistentPartitionStore(props);
     }
 
     @Bean
