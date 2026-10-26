@@ -1,0 +1,6 @@
+tasks.register('chunkStats', JavaExec) {
+    description = 'Chunks data/msmarco/collection.2M.tsv and prints counts'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'dev.vectorsearch.common.chunk.ChunkStats'
+    workingDir = rootDir
+}
