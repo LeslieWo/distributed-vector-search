@@ -23,6 +23,11 @@ public record ClusterView(long ringVersion, HashRing ring, HashRing pending, Map
         live = Map.copyOf(live);
     }
 
+    /** False until an operator initialised the ring (ClusterAdmin init). */
+    public boolean hasRing() {
+        return ring != null;
+    }
+
     public boolean isLive(String node) {
         return live.containsKey(node);
     }

@@ -7,6 +7,7 @@ dependencies {
 
     api project(':proto')
     api 'org.apache.kafka:kafka-clients'
+    api 'io.lettuce:lettuce-core' // Redis: membership heartbeats, ring metadata (version from the Boot BOM)
     implementation 'org.slf4j:slf4j-api'
 
     testImplementation 'org.testcontainers:junit-jupiter'

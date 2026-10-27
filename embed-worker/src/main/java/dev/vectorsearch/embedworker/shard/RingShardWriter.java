@@ -48,6 +48,7 @@ public final class RingShardWriter implements ShardWriter {
     @Override
     public void write(List<EmbeddedChunk> chunks) {
         ClusterView view = cluster.view();
+        if (!view.hasRing()) throw new ShardWriteException("no ring in cluster metadata yet (run ClusterAdmin init)", true, null);
         Map<String, UpsertRequest.Builder> perNode = new LinkedHashMap<>();
         for (EmbeddedChunk c : chunks) {
             ChunkVector.Builder base = ChunkVector.newBuilder().setChunkId(c.chunkId()).setText(c.text());
@@ -92,7 +93,6 @@ public final class RingShardWriter implements ShardWriter {
 
     @Override
     public void close() {
-        channels.close();
-        cluster.close();
+        channels.close(); // the cluster view is its own bean with its own lifecycle
     }
 }

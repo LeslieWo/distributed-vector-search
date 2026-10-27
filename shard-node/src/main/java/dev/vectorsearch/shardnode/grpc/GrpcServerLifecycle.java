@@ -22,6 +22,9 @@ import org.springframework.context.SmartLifecycle;
 public class GrpcServerLifecycle implements SmartLifecycle {
     private static final Logger log = LoggerFactory.getLogger(GrpcServerLifecycle.class);
 
+    /** Started before / stopped after anything that depends on the port being open (membership). */
+    public static final int PHASE = SmartLifecycle.DEFAULT_PHASE - 100;
+
     private final int port;
     private final int threads;
     private final List<BindableService> services;
@@ -83,6 +86,11 @@ public class GrpcServerLifecycle implements SmartLifecycle {
     @Override
     public boolean isRunning() {
         return server != null;
+    }
+
+    @Override
+    public int getPhase() {
+        return PHASE;
     }
 
     /** Actual bound port (useful when configured with 0 in tests). */

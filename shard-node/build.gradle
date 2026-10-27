@@ -6,6 +6,8 @@ dependencies {
     runtimeOnly 'io.micrometer:micrometer-registry-prometheus'
     testImplementation 'io.grpc:grpc-inprocess:1.76.0'
     testImplementation project(':embedding')
+    testImplementation 'org.testcontainers:junit-jupiter'
+
 }
 
 // Dev tools in src/test/java/.../bench, run with e.g. ./gradlew :shard-node:embedSubset

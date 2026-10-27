@@ -18,7 +18,12 @@ public record ShardNodeProperties(
         int grpcThreads,
         Path dataDir,
         Duration snapshotInterval,
-        long snapshotWalBytes) {
+        long snapshotWalBytes,
+        String redisUri,
+        String advertiseHost,
+        Duration heartbeatInterval,
+        Duration heartbeatTtl,
+        Duration deregisterGrace) {
 
     public ShardNodeProperties {
         if (nodeId == null || nodeId.isBlank()) nodeId = "node-1";
@@ -34,5 +39,17 @@ public record ShardNodeProperties(
         if (snapshotInterval == null) snapshotInterval = Duration.ofMinutes(5);
         // Snapshot early once the WAL passes this size, bounding replay time after a crash (BUILDLOG step 22).
         if (snapshotWalBytes <= 0) snapshotWalBytes = 64L << 20;
+        // Membership (step 24): blank redisUri = no heartbeat (unit tests, standalone runs).
+        if (redisUri == null) redisUri = "";
+        if (advertiseHost == null || advertiseHost.isBlank()) advertiseHost = "localhost";
+        if (heartbeatInterval == null) heartbeatInterval = Duration.ofSeconds(1);
+        if (heartbeatTtl == null) heartbeatTtl = Duration.ofSeconds(3);
+        if (deregisterGrace == null) deregisterGrace = Duration.ofSeconds(1);
+    }
+
+    /** Settings for tests: no heartbeat, given data dir and snapshot policy. */
+    public static ShardNodeProperties forTest(String nodeId, int dim, Path dataDir, Duration snapshotInterval, long snapshotWalBytes) {
+        return new ShardNodeProperties(nodeId, 0, dim, 16, 100, 32, 16, 100, 2, dataDir, snapshotInterval, snapshotWalBytes,
+                "", null, null, null, null);
     }
 }

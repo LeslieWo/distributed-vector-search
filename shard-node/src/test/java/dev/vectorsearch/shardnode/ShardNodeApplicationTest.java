@@ -23,7 +23,7 @@ import org.springframework.boot.test.web.client.TestRestTemplate;
 // Spring Boot disables metric exporters in tests by default; re-enable the Prometheus one.
 @AutoConfigureObservability(tracing = false)
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = {"shard.grpc-port=0", "shard.dimension=8", "shard.initial-capacity=64",
-        "shard.data-dir=build/test-data/${random.uuid}"})
+        "shard.data-dir=build/test-data/${random.uuid}", "shard.redis-uri="})
 class ShardNodeApplicationTest {
 
     @Autowired

@@ -1,5 +1,6 @@
 package dev.vectorsearch.shardnode;
 
+import dev.vectorsearch.shardnode.cluster.MembershipLifecycle;
 import dev.vectorsearch.shardnode.grpc.GrpcServerLifecycle;
 import dev.vectorsearch.shardnode.grpc.ShardGrpcService;
 import dev.vectorsearch.shardnode.metrics.GrpcMetricsInterceptor;
@@ -40,5 +41,10 @@ public class ShardNodeApplication {
     GrpcServerLifecycle grpcServer(ShardNodeProperties props, ShardGrpcService service, MeterRegistry registry) {
         return new GrpcServerLifecycle(props.grpcPort(), props.grpcThreads(), List.of(service),
                 List.of(new GrpcMetricsInterceptor(registry)));
+    }
+
+    @Bean
+    MembershipLifecycle membership(ShardNodeProperties props, GrpcServerLifecycle grpc) {
+        return new MembershipLifecycle(props, grpc);
     }
 }

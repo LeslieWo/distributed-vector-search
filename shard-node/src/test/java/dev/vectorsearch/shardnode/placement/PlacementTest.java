@@ -27,7 +27,7 @@ class PlacementTest {
         List<String> nodes = List.of("node-1", "node-2", "node-3");
         HashRing ring = HashRing.of(nodes);
         Map<String, PartitionStore> stores = new TreeMap<>();
-        for (String n : nodes) stores.put(n, new PartitionStore(new ShardNodeProperties(n, 0, DIM, 16, 100, 32, 16, 100, 2, null, null, 0)));
+        for (String n : nodes) stores.put(n, new PartitionStore(ShardNodeProperties.forTest(n, DIM, null, null, 0)));
 
         Random rnd = new Random(7);
         List<PartitionStore.Entry> chunks = new ArrayList<>();

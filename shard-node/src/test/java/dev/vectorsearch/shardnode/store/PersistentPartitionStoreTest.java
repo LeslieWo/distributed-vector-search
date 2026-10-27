@@ -25,7 +25,7 @@ class PersistentPartitionStoreTest {
     }
 
     ShardNodeProperties props(long snapshotWalBytes) {
-        return new ShardNodeProperties("node-1", 0, 3, 16, 100, 32, 16, 100, 2, dir, Duration.ofHours(1), snapshotWalBytes);
+        return ShardNodeProperties.forTest("node-1", 3, dir, Duration.ofHours(1), snapshotWalBytes);
     }
 
     static PartitionStore.Entry e(String id, String partition, float... v) {

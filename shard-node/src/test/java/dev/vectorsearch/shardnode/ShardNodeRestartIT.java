@@ -27,7 +27,7 @@ class ShardNodeRestartIT {
     ConfigurableApplicationContext boot() {
         return new SpringApplicationBuilder(ShardNodeApplication.class).run(
                 "--shard.grpc-port=0", "--server.port=0", "--shard.dimension=4",
-                "--shard.initial-capacity=16", "--shard.data-dir=" + dataDir);
+                "--shard.initial-capacity=16", "--shard.data-dir=" + dataDir, "--shard.redis-uri=");
     }
 
     static <T> T call(ConfigurableApplicationContext ctx, Function<ShardServiceGrpc.ShardServiceBlockingStub, T> fn) {

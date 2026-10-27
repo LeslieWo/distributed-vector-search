@@ -1,6 +1,8 @@
 package dev.vectorsearch.embedworker;
 
 import dev.vectorsearch.common.cluster.ChannelPool;
+import dev.vectorsearch.common.cluster.ClusterViewSource;
+import dev.vectorsearch.common.cluster.RedisClusterView;
 import dev.vectorsearch.common.cluster.StaticClusterView;
 import dev.vectorsearch.common.kafka.TopicInitializer;
 import dev.vectorsearch.embedding.Embedder;
@@ -36,11 +38,19 @@ public class EmbedWorkerApplication {
         };
     }
 
+    /** Ring + live nodes from Redis (step 24), or a fixed list when worker.static-nodes is set (tests). */
+    @Bean
+    ClusterViewSource clusterView(WorkerProperties props) {
+        return props.staticNodes().isBlank()
+                ? new RedisClusterView(props.redisUri(), props.clusterPoll())
+                : StaticClusterView.parse(props.staticNodes());
+    }
+
     /** Each chunk goes to both holders of its partition on the consistent-hash ring (step 23). */
     @Bean
-    ShardWriter shardWriter(WorkerProperties props) {
+    ShardWriter shardWriter(WorkerProperties props, ClusterViewSource cluster) {
         ChannelPool channels = new ChannelPool(addr -> NettyChannelBuilder.forTarget(addr).usePlaintext().maxInboundMessageSize(32 << 20).build());
-        return new RingShardWriter(StaticClusterView.parse(props.staticNodes()), channels, props.shardDeadline().toMillis());
+        return new RingShardWriter(cluster, channels, props.shardDeadline().toMillis());
     }
 
     @Bean

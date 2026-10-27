@@ -16,6 +16,8 @@ public record WorkerProperties(
         String embedder,
         Path modelDir,
         String staticNodes,
+        String redisUri,
+        Duration clusterPoll,
         Duration shardDeadline,
         Duration retryBackoffInitial,
         Duration retryBackoffMax,
@@ -31,7 +33,9 @@ public record WorkerProperties(
         if (maxPollInterval == null) maxPollInterval = Duration.ofMinutes(5);
         if (embedder == null || embedder.isBlank()) embedder = "onnx";
         if (modelDir == null) modelDir = Path.of("data/models/all-MiniLM-L6-v2");
-        if (staticNodes == null || staticNodes.isBlank()) staticNodes = "node-1=localhost:9101,node-2=localhost:9102,node-3=localhost:9103";
+        if (staticNodes == null) staticNodes = ""; // blank = membership from Redis
+        if (redisUri == null || redisUri.isBlank()) redisUri = "redis://localhost:6379";
+        if (clusterPoll == null) clusterPoll = Duration.ofMillis(500);
         if (shardDeadline == null) shardDeadline = Duration.ofSeconds(10);
         if (retryBackoffInitial == null) retryBackoffInitial = Duration.ofMillis(200);
         if (retryBackoffMax == null) retryBackoffMax = Duration.ofSeconds(5);
