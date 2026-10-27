@@ -8,7 +8,13 @@ import dev.vectorsearch.coordinator.search.ShardSearcher;
 import dev.vectorsearch.embedding.Embedder;
 import dev.vectorsearch.embedding.HashingEmbedder;
 import dev.vectorsearch.embedding.MiniLmEmbedder;
-import io.grpc.Status;
+import dev.vectorsearch.common.cluster.ChannelPool;
+import dev.vectorsearch.common.cluster.ViewAcker;
+import dev.vectorsearch.coordinator.search.RoundRobinSelector;
+import dev.vectorsearch.coordinator.search.ScatterGather;
+import io.grpc.netty.shaded.io.grpc.netty.NettyChannelBuilder;
+import java.lang.management.ManagementFactory;
+import java.time.Duration;
 import io.micrometer.core.instrument.FunctionCounter;
 import io.micrometer.core.instrument.MeterRegistry;
 import org.springframework.boot.SpringApplication;
@@ -49,12 +55,26 @@ public class CoordinatorApplication {
         return cache;
     }
 
-    /** Step 29 stand-in; step 30 replaces it with scatter-gather over the ring's partitions. */
     @Bean
-    ShardSearcher shardSearcher() {
-        return (query, k, deadline) -> {
-            throw Status.UNIMPLEMENTED.withDescription("scatter-gather arrives in step 30").asRuntimeException();
-        };
+    ChannelPool shardChannels() {
+        return new ChannelPool(addr -> NettyChannelBuilder.forTarget(addr).usePlaintext().maxInboundMessageSize(32 << 20).build());
+    }
+
+    @Bean
+    ShardSearcher shardSearcher(CoordinatorProperties props, RedisClusterView cluster, ChannelPool channels) {
+        return new ScatterGather(cluster, channels, new RoundRobinSelector(), props.efSearch());
+    }
+
+    /**
+     * Tells a rebalance which ring this coordinator reads (step 27): old copies are deleted only after every
+     * reader moved to the new ring. Every query calls cluster.view() when it starts, so queries starting after
+     * an ack use at least that version; older in-flight ones are covered by the rebalancer's grace period.
+     */
+    @Bean
+    ViewAcker readerAcker(CoordinatorProperties props, RedisClusterView cluster) {
+        String id = ManagementFactory.getRuntimeMXBean().getName();
+        return new ViewAcker(props.redisUri(), ViewAcker.READER, id,
+                () -> ViewAcker.state(cluster.view().ringVersion(), -1), Duration.ofSeconds(1), Duration.ofSeconds(3));
     }
 
     @Bean

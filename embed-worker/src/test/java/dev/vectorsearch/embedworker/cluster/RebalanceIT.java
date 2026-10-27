@@ -19,6 +19,7 @@ import dev.vectorsearch.proto.v1.ScanRequest;
 import dev.vectorsearch.proto.v1.ShardSearchRequest;
 import dev.vectorsearch.proto.v1.ShardSearchResponse;
 import dev.vectorsearch.proto.v1.ShardServiceGrpc;
+import dev.vectorsearch.shardnode.testing.TestShardNode;
 import io.grpc.netty.shaded.io.grpc.netty.NettyChannelBuilder;
 import java.io.PrintStream;
 import java.nio.file.Path;
