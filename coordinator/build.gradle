@@ -16,3 +16,10 @@ tasks.register('clusterAdmin', JavaExec) {
     workingDir = rootDir
     if (project.hasProperty('args')) args project.property('args').split(' ')
 }
+
+tasks.register('cacheBench', JavaExec) {
+    description = 'Query cache hit latency vs query embedding latency (needs local Redis + model)'
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'dev.vectorsearch.coordinator.cache.CacheBench'
+    workingDir = rootDir
+}
