@@ -1,0 +1,5 @@
+dependencies {
+    implementation project(':embedding')
+    implementation 'io.grpc:grpc-netty-shaded:1.76.0'
+    testImplementation 'io.grpc:grpc-inprocess:1.76.0'
+}
