@@ -32,3 +32,20 @@ tasks.register('queryBench', JavaExec) {
     workingDir = rootDir
     if (project.hasProperty('args')) args project.property('args').split(' ')
 }
+
+tasks.register('recallCheck', JavaExec) {
+    description = 'recall@k of the coordinator vs brute force over everything stored in the cluster: -Pargs="localhost:9100 500 10"'
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'dev.vectorsearch.coordinator.tools.RecallCheck'
+    workingDir = rootDir
+    jvmArgs '-Xmx2g'
+    if (project.hasProperty('args')) args project.property('args').split(' ')
+}
+
+tasks.register('loadLoop', JavaExec) {
+    description = 'Closed-loop concurrent query load with per-second stats: -Pargs="localhost:9100 4 40"'
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'dev.vectorsearch.coordinator.tools.LoadLoop'
+    workingDir = rootDir
+    if (project.hasProperty('args')) args project.property('args').split(' ')
+}
