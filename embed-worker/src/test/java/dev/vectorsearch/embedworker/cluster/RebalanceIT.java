@@ -204,4 +204,82 @@ class RebalanceIT {
             rb.partitionSizes().forEach((p, sizes) -> assertEquals(1, new HashSet<>(sizes.values()).size(), p + " " + sizes));
         }
     }
+
+    Rebalancer rebalancer(RingStore store, Duration barrierTimeout) {
+        return new Rebalancer(store, pool, barrierTimeout, Duration.ofMillis(300), new PrintStream(System.out));
+    }
+
+    @Test
+    void refusesUnsafeRebalancesWithoutChangingAnything() throws Exception {
+        List<String> ids = writeChunks("s", 600);
+        HashRing three = HashRing.of(List.of("node-1", "node-2", "node-3"));
+        try (RingStore store = new RingStore(uri)) {
+            // a joining node that already holds data (e.g. leftovers of an earlier life) is refused
+            stub("node-4").upsert(dev.vectorsearch.proto.v1.UpsertRequest.newBuilder().addChunks(ChunkVector.newBuilder()
+                    .setChunkId("old#0").setPartition("x").setText("t").addAllVector(java.util.Collections.nCopies(DIM, 0.1f))).build());
+            assertThrowsMessage(() -> rebalancer(store, Duration.ofSeconds(5)).rebalance(List.of("node-1", "node-2", "node-3", "node-4")), "already stores");
+            // a target node that is not live is refused
+            assertThrowsMessage(() -> rebalancer(store, Duration.ofSeconds(5)).rebalance(List.of("node-1", "node-2", "node-9")), "not live");
+            // both holders of a partition dead: its data is unavailable, nothing to copy from
+            nodes.get("node-1").crash();
+            nodes.get("node-2").crash();
+            Thread.sleep(1000);
+            assertThrowsMessage(() -> rebalancer(store, Duration.ofSeconds(5)).rebalance(List.of("node-3", "node-4")), "no live holder");
+            assertEquals(1, store.ring().version());
+            assertEquals(null, store.pending());
+        }
+        assertEquals(3, three.partitions().size());
+    }
+
+    @Test
+    void aLaggingWriterBlocksTheCopyAndAbortLeavesTheRingIntact() throws Exception {
+        List<String> ids = writeChunks("l", 600);
+        HashRing three = HashRing.of(List.of("node-1", "node-2", "node-3"));
+        // a writer stuck on ring v1 without the pending ring (e.g. its Redis polling is broken)
+        try (ViewAcker stale = new ViewAcker(uri, ViewAcker.WRITER, "stuck", () -> ViewAcker.state(1, -1), Duration.ofMillis(200), Duration.ofMillis(600));
+             RingStore store = new RingStore(uri)) {
+            assertThrowsMessage(() -> rebalancer(store, Duration.ofSeconds(2)).rebalance(List.of("node-1", "node-2", "node-3", "node-4")),
+                    "timed out waiting for writers");
+            assertEquals(2, store.pending().version(), "pending stays so a re-run can resume");
+            assertEquals(0, stub("node-4").health(HealthRequest.getDefaultInstance()).getPartitionSizesMap().size(), "nothing copied");
+            store.abortRebalance();
+            assertEquals(1, store.ring().version());
+        }
+        assertExactlyOnItsTwoHolders(three, ids, List.of("node-1", "node-2", "node-3", "node-4"));
+    }
+
+    @Test
+    void anInterruptedRebalanceResumesWithTheSameTarget() throws Exception {
+        List<String> ids = writeChunks("r", 900);
+        List<String> four = List.of("node-1", "node-2", "node-3", "node-4");
+        try (RingStore store = new RingStore(uri)) {
+            store.beginRebalance(four); // operator's first run died right after publishing the pending ring
+            assertThrowsMessage(() -> rebalancer(store, Duration.ofSeconds(5)).rebalance(List.of("node-1", "node-2")), "another rebalance is pending");
+            rebalancer(store, Duration.ofSeconds(10)).rebalance(four);
+            assertEquals(2, store.ring().version());
+        }
+        assertExactlyOnItsTwoHolders(HashRing.of(four), ids, four);
+    }
+
+    @Test
+    void repairRefillsANodeThatLostItsDisk() throws Exception {
+        List<String> ids = writeChunks("d", 900);
+        nodes.get("node-3").crash();
+        nodes.get("node-3").close();
+        Thread.sleep(800);
+        nodes.put("node-3", new TestShardNode("node-3", DIM, dir.resolve("node-3-new-disk"), uri)); // same id, empty disk
+        Thread.sleep(300);
+        HashRing three = HashRing.of(List.of("node-1", "node-2", "node-3"));
+        try (RingStore store = new RingStore(uri)) {
+            long copied = rebalancer(store, Duration.ofSeconds(5)).repair("node-3");
+            long expected = ids.stream().filter(id -> three.partitionOf(id).heldBy("node-3")).count();
+            assertEquals(expected, copied);
+        }
+        assertExactlyOnItsTwoHolders(three, ids, List.of("node-1", "node-2", "node-3", "node-4"));
+    }
+
+    static void assertThrowsMessage(org.junit.jupiter.api.function.Executable call, String fragment) {
+        IllegalStateException e = org.junit.jupiter.api.Assertions.assertThrows(IllegalStateException.class, call);
+        assertTrue(e.getMessage().contains(fragment), e.getMessage());
+    }
 }
