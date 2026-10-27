@@ -24,3 +24,11 @@ tasks.register('cacheBench', JavaExec) {
     mainClass = 'dev.vectorsearch.coordinator.cache.CacheBench'
     workingDir = rootDir
 }
+
+tasks.register('queryBench', JavaExec) {
+    description = 'MS MARCO dev queries through a running coordinator: -Pargs="localhost:9100 200 10 2" or "localhost:9100 show <query>"'
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'dev.vectorsearch.coordinator.tools.QueryBench'
+    workingDir = rootDir
+    if (project.hasProperty('args')) args project.property('args').split(' ')
+}

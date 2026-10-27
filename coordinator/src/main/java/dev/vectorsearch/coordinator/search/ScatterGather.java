@@ -15,7 +15,6 @@ import dev.vectorsearch.proto.v1.ShardServiceGrpc;
 import io.grpc.Deadline;
 import io.grpc.Status;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -83,21 +82,7 @@ public final class ScatterGather implements ShardSearcher {
                 results.add(r);
             }
         });
-        return new Result(merge(results, k), missing);
-    }
-
-    /** Step 30: plain sort of all partition hits; step 31 replaces it with a bounded heap. */
-    static List<ScoredChunk> merge(List<PartitionResult> results, int k) {
-        List<ScoredChunk> all = new ArrayList<>();
-        results.forEach(r -> all.addAll(r.hits()));
-        all.sort(Comparator.comparingDouble(ScoredChunk::getScore).reversed());
-        List<ScoredChunk> out = new ArrayList<>(k);
-        HashSet<String> seen = new HashSet<>();
-        for (ScoredChunk c : all) {
-            if (out.size() == k) break;
-            if (seen.add(c.getChunkId())) out.add(c);
-        }
-        return out;
+        return new Result(TopKMerger.merge(results.stream().map(PartitionResult::hits).toList(), k), missing);
     }
 
     private CompletableFuture<PartitionResult> searchPartition(Partition p, ClusterView view, ShardSearchRequest req, Deadline deadline) {
