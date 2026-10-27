@@ -31,6 +31,10 @@ public final class TestShardNode implements AutoCloseable {
     public final Map<String, AtomicInteger> searchesPerPartition = new ConcurrentHashMap<>();
     /** added to every Search before it runs (simulates a slow or overloaded node) */
     public volatile long searchDelayMillis;
+    /** if set, an extra random delay per Search in ms (simulates GC pauses / noisy neighbours: tail latency) */
+    public volatile java.util.function.LongSupplier randomDelayMillis;
+    /** Searches the node skipped because the caller had already cancelled or timed out (step 32) */
+    public final AtomicInteger skippedExpired = new AtomicInteger();
     /** every Search fails with this status (null = serve normally) */
     public volatile Status searchFailure;
     /** time left until the caller's deadline when the last Search arrived, ms (-1 = no deadline) */
@@ -53,7 +57,7 @@ public final class TestShardNode implements AutoCloseable {
                     out.onError(searchFailure.asRuntimeException());
                     return;
                 }
-                long delay = searchDelayMillis;
+                long delay = searchDelayMillis + (randomDelayMillis == null ? 0 : randomDelayMillis.getAsLong());
                 if (delay > 0) {
                     try {
                         Thread.sleep(delay);
@@ -64,6 +68,7 @@ public final class TestShardNode implements AutoCloseable {
                 super.search(req, out);
             }
         };
+        service.setOnExpired(skippedExpired::incrementAndGet);
         this.grpc = new GrpcServerLifecycle(port, 8, List.of(service));
         grpc.start();
         this.heartbeat = new Heartbeater(redisUri, id, "localhost:" + grpc.port(), Duration.ofMillis(200), Duration.ofMillis(600));

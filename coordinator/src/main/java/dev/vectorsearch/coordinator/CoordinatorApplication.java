@@ -10,6 +10,9 @@ import dev.vectorsearch.embedding.HashingEmbedder;
 import dev.vectorsearch.embedding.MiniLmEmbedder;
 import dev.vectorsearch.common.cluster.ChannelPool;
 import dev.vectorsearch.common.cluster.ViewAcker;
+import dev.vectorsearch.coordinator.search.AdaptiveHedgePolicy;
+import dev.vectorsearch.coordinator.search.HedgeBudget;
+import dev.vectorsearch.coordinator.search.HedgePolicy;
 import dev.vectorsearch.coordinator.search.NodeStats;
 import dev.vectorsearch.coordinator.search.PowerOfTwoChoicesSelector;
 import dev.vectorsearch.coordinator.search.ReplicaSelector;
@@ -78,9 +81,14 @@ public class CoordinatorApplication {
         };
     }
 
+    /** Hedged requests (step 34): adaptive per-partition p95 delay with a floor, capped at hedge-budget-ratio extra load. */
     @Bean
-    ShardSearcher shardSearcher(CoordinatorProperties props, RedisClusterView cluster, ChannelPool channels, ReplicaSelector selector, NodeStats stats) {
-        return new ScatterGather(cluster, channels, selector, stats, props.efSearch(), props.responseReserve(), props.shardTimeout());
+    ShardSearcher shardSearcher(CoordinatorProperties props, RedisClusterView cluster, ChannelPool channels, ReplicaSelector selector,
+                                NodeStats stats, MeterRegistry registry) {
+        HedgePolicy hedge = props.hedging()
+                ? new AdaptiveHedgePolicy(props.hedgeMinDelay().toNanos(), props.hedgeInitialDelay().toNanos()) : null;
+        return new ScatterGather(cluster, channels, selector, stats, props.efSearch(), props.responseReserve(), props.shardTimeout(),
+                hedge, new HedgeBudget(props.hedgeBudgetRatio(), 10), registry);
     }
 
     /**

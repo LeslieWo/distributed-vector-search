@@ -14,13 +14,18 @@ import dev.vectorsearch.proto.v1.ShardSearchResponse;
 import dev.vectorsearch.proto.v1.ShardServiceGrpc;
 import io.grpc.Deadline;
 import io.grpc.Status;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicReference;
@@ -30,7 +35,8 @@ import java.util.concurrent.atomic.AtomicReference;
  * Gather: wait for all of them (bounded by the query deadline) and merge into the global top-k.
  *
  * <p>Every chunk is in exactly one partition (BUILDLOG step 22), so asking each partition once covers
- * every vector exactly once.
+ * every vector exactly once. Per partition, a hedged request goes to the other holder when the first one has
+ * not answered within the hedge delay (step 34); the first answer wins and the other call is cancelled.
  */
 public final class ScatterGather implements ShardSearcher {
     private final ClusterViewSource cluster;
@@ -40,15 +46,25 @@ public final class ScatterGather implements ShardSearcher {
     private final int efSearch;
     private final long reserveMicros;
     private final long shardTimeoutMicros;
+    private final HedgePolicy hedgePolicy; // null = hedging off
+    private final HedgeBudget hedgeBudget;
+    private final ScheduledExecutorService timers =
+            Executors.newSingleThreadScheduledExecutor(Thread.ofPlatform().name("hedge-timer").daemon().factory());
     private final AtomicReference<ClusterView> lastView = new AtomicReference<>();
+    final Counter hedgesSent;
+    final Counter hedgesWon;
+    final Counter hedgesDenied;
+    final Counter partitionRequests;
 
     /**
      * @param responseReserve shards are given the query deadline minus this, so that when they time out the
      *                        coordinator still has time to merge and answer with partial results
      * @param shardTimeout    cap on one partition request even when the query deadline is far away
+     * @param hedgePolicy     when to hedge; null disables hedging
      */
     public ScatterGather(ClusterViewSource cluster, ChannelPool channels, ReplicaSelector selector, NodeStats stats, int efSearch,
-                         Duration responseReserve, Duration shardTimeout) {
+                         Duration responseReserve, Duration shardTimeout, HedgePolicy hedgePolicy, HedgeBudget hedgeBudget,
+                         MeterRegistry registry) {
         this.cluster = cluster;
         this.channels = channels;
         this.selector = selector;
@@ -56,6 +72,19 @@ public final class ScatterGather implements ShardSearcher {
         this.efSearch = efSearch;
         this.reserveMicros = responseReserve.toNanos() / 1000;
         this.shardTimeoutMicros = shardTimeout.toNanos() / 1000;
+        this.hedgePolicy = hedgePolicy;
+        this.hedgeBudget = hedgeBudget;
+        this.hedgesSent = Counter.builder("vs.coord.hedge.sent").description("hedged partition requests sent").register(registry);
+        this.hedgesWon = Counter.builder("vs.coord.hedge.won").description("hedged requests that answered first").register(registry);
+        this.hedgesDenied = Counter.builder("vs.coord.hedge.denied").description("hedges skipped because the budget was empty").register(registry);
+        this.partitionRequests = Counter.builder("vs.coord.partition.requests").description("first-choice partition requests").register(registry);
+    }
+
+    /** Without hedging (tests of the earlier steps). */
+    public ScatterGather(ClusterViewSource cluster, ChannelPool channels, ReplicaSelector selector, NodeStats stats, int efSearch,
+                         Duration responseReserve, Duration shardTimeout) {
+        this(cluster, channels, selector, stats, efSearch, responseReserve, shardTimeout, null, null,
+                new io.micrometer.core.instrument.simple.SimpleMeterRegistry());
     }
 
     /** Deadline for the partition requests: min(query deadline - reserve, now + shard timeout). */
@@ -76,11 +105,14 @@ public final class ScatterGather implements ShardSearcher {
         ShardSearchRequest.Builder base = ShardSearchRequest.newBuilder().setK(k).setEf(efSearch);
         for (float x : query) base.addVector(x);
 
-        Map<Partition, CompletableFuture<PartitionResult>> calls = new LinkedHashMap<>();
-        for (Partition p : view.ring().partitions()) calls.put(p, searchPartition(p, view, base.setPartition(p.id()).build(), deadline));
-
+        Map<Partition, PartitionCall> calls = new LinkedHashMap<>();
+        for (Partition p : view.ring().partitions()) {
+            PartitionCall call = new PartitionCall(p, view, base.setPartition(p.id()).build(), deadline);
+            calls.put(p, call);
+            call.start();
+        }
         try {
-            CompletableFuture.allOf(calls.values().toArray(CompletableFuture[]::new))
+            CompletableFuture.allOf(calls.values().stream().map(c -> c.result).toArray(CompletableFuture[]::new))
                     .get(Math.max(0, deadline.timeRemaining(TimeUnit.MICROSECONDS)), TimeUnit.MICROSECONDS);
         } catch (TimeoutException e) {
             // fall through: unfinished partitions are reported missing below
@@ -91,10 +123,10 @@ public final class ScatterGather implements ShardSearcher {
         }
         List<PartitionResult> results = new ArrayList<>();
         List<String> missing = new ArrayList<>();
-        calls.forEach((p, f) -> {
-            PartitionResult r = f.getNow(null);
+        calls.forEach((p, call) -> {
+            PartitionResult r = call.result.getNow(null);
             if (r == null) {
-                f.cancel(true);
+                call.result.cancel(true); // cancels every attempt still in flight
                 missing.add(p.id());
             } else if (r.error() != null) {
                 missing.add(p.id());
@@ -105,32 +137,104 @@ public final class ScatterGather implements ShardSearcher {
         return new Result(TopKMerger.merge(results.stream().map(PartitionResult::hits).toList(), k), missing);
     }
 
-    private CompletableFuture<PartitionResult> searchPartition(Partition p, ClusterView view, ShardSearchRequest req, Deadline deadline) {
-        List<String> live = ReplicaSelector.liveHolders(p, view);
-        if (live.isEmpty()) return CompletableFuture.completedFuture(new PartitionResult(p, List.of(), "no live holder"));
-        String node = selector.choose(p, live);
-        long t0 = System.nanoTime();
-        stats.started(node);
-        ListenableFuture<ShardSearchResponse> call = ShardServiceGrpc.newFutureStub(channels.get(view.address(node)))
-                .withDeadline(deadline).search(req);
-        CompletableFuture<PartitionResult> out = new CompletableFuture<>();
-        Futures.addCallback(call, new FutureCallback<>() {
-            @Override
-            public void onSuccess(ShardSearchResponse r) {
-                stats.finished(node, System.nanoTime() - t0);
-                out.complete(new PartitionResult(p, r.getHitsList(), null));
-            }
+    /** One partition's request: first choice, optional hedge, first success wins. */
+    private final class PartitionCall {
+        final Partition partition;
+        final ClusterView view;
+        final ShardSearchRequest request;
+        final Deadline deadline;
+        final CompletableFuture<PartitionResult> result = new CompletableFuture<>();
+        private final Map<String, ListenableFuture<ShardSearchResponse>> attempts = new LinkedHashMap<>(); // guarded by this
+        private final Set<String> failed = new HashSet<>();
+        private final List<String> errors = new ArrayList<>();
+        private boolean hedgeTimerPending; // guarded by this
 
-            @Override
-            public void onFailure(Throwable t) {
-                stats.finished(node, System.nanoTime() - t0); // a timeout records the full wait: the node looks slow
-                out.complete(new PartitionResult(p, List.of(), node + ": " + Status.fromThrowable(t)));
+        PartitionCall(Partition partition, ClusterView view, ShardSearchRequest request, Deadline deadline) {
+            this.partition = partition;
+            this.view = view;
+            this.request = request;
+            this.deadline = deadline;
+            result.whenComplete((r, e) -> cancelAll()); // winner found, gave up, or timed out: stop the rest
+        }
+
+        void start() {
+            List<String> live = ReplicaSelector.liveHolders(partition, view);
+            if (live.isEmpty()) {
+                result.complete(new PartitionResult(partition, List.of(), "no live holder"));
+                return;
             }
-        }, MoreExecutors.directExecutor());
-        out.whenComplete((r, e) -> {
-            if (out.isCancelled()) call.cancel(true); // gave up on this partition: cancel the RPC on the shard too
-        });
-        return out;
+            partitionRequests.increment();
+            if (hedgeBudget != null) hedgeBudget.onRequest();
+            send(selector.choose(partition, live), false);
+            if (hedgePolicy != null && live.size() > 1) {
+                long delay = hedgePolicy.delayNanos(partition);
+                if (delay < deadline.timeRemaining(TimeUnit.NANOSECONDS)) {
+                    synchronized (this) {
+                        hedgeTimerPending = true;
+                    }
+                    timers.schedule(this::hedge, delay, TimeUnit.NANOSECONDS);
+                }
+            }
+        }
+
+        private void hedge() {
+            String other;
+            synchronized (this) {
+                hedgeTimerPending = false;
+                if (result.isDone()) return;
+                other = ReplicaSelector.liveHolders(partition, view).stream().filter(n -> !attempts.containsKey(n)).findFirst().orElse(null);
+            }
+            if (other != null && hedgeBudget.tryAcquire()) {
+                hedgesSent.increment();
+                send(other, true);
+                return;
+            }
+            if (other != null) hedgesDenied.increment();
+            completeIfAllFailed(); // the first attempt may already have failed while we waited
+        }
+
+        private void completeIfAllFailed() {
+            boolean allFailed;
+            synchronized (this) {
+                allFailed = !hedgeTimerPending && failed.containsAll(attempts.keySet());
+            }
+            if (allFailed) result.complete(new PartitionResult(partition, List.of(), String.join("; ", errors)));
+        }
+
+        private void send(String node, boolean isHedge) {
+            long t0 = System.nanoTime();
+            stats.started(node);
+            ListenableFuture<ShardSearchResponse> call = ShardServiceGrpc.newFutureStub(channels.get(view.address(node)))
+                    .withDeadline(deadline).search(request);
+            synchronized (this) {
+                attempts.put(node, call);
+                if (result.isDone()) call.cancel(true); // lost a race with completion
+            }
+            Futures.addCallback(call, new FutureCallback<>() {
+                @Override
+                public void onSuccess(ShardSearchResponse r) {
+                    long latency = System.nanoTime() - t0;
+                    stats.finished(node, latency);
+                    if (hedgePolicy != null) hedgePolicy.record(partition, latency);
+                    if (result.complete(new PartitionResult(partition, r.getHitsList(), null)) && isHedge) hedgesWon.increment();
+                }
+
+                @Override
+                public void onFailure(Throwable t) {
+                    stats.finished(node, System.nanoTime() - t0); // a timeout records the full wait: the node looks slow
+                    if (call.isCancelled()) return; // we cancelled it ourselves (the other attempt won)
+                    synchronized (PartitionCall.this) {
+                        failed.add(node);
+                        errors.add(node + ": " + Status.fromThrowable(t));
+                    }
+                    completeIfAllFailed();
+                }
+            }, MoreExecutors.directExecutor());
+        }
+
+        private synchronized void cancelAll() {
+            for (ListenableFuture<ShardSearchResponse> a : attempts.values()) if (!a.isDone()) a.cancel(true);
+        }
     }
 
     /** Fresh channel for a node that comes back (see ChannelPool.retainOnly, BUILDLOG step 26). */

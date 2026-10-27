@@ -20,6 +20,10 @@ public record CoordinatorProperties(
         Duration responseReserve,
         Duration shardTimeout,
         String replicaSelection,
+        boolean hedging,
+        Duration hedgeMinDelay,
+        Duration hedgeInitialDelay,
+        double hedgeBudgetRatio,
         boolean cacheEnabled,
         Duration cacheTtl,
         Duration cacheTimeout) {
@@ -40,6 +44,9 @@ public record CoordinatorProperties(
         // upper bound for one partition request even when the query deadline is far away
         if (shardTimeout == null) shardTimeout = Duration.ofMillis(500);
         if (replicaSelection == null || replicaSelection.isBlank()) replicaSelection = "p2c";
+        if (hedgeMinDelay == null) hedgeMinDelay = Duration.ofMillis(3);
+        if (hedgeInitialDelay == null) hedgeInitialDelay = Duration.ofMillis(10);
+        if (hedgeBudgetRatio <= 0) hedgeBudgetRatio = 0.1;
         if (cacheTtl == null) cacheTtl = Duration.ofSeconds(60);
         if (cacheTimeout == null) cacheTimeout = Duration.ofMillis(50);
     }
