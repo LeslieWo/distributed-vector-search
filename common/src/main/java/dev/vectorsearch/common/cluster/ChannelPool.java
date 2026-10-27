@@ -20,7 +20,12 @@ public final class ChannelPool implements AutoCloseable {
         return channels.computeIfAbsent(address, factory);
     }
 
-    /** Closes channels to addresses that are no longer in use. */
+    /**
+     * Closes channels to addresses that are no longer live. Besides freeing resources this matters for recovery:
+     * a channel that kept failing to connect sits in gRPC's exponential reconnect backoff (1 s, 1.6 s, 2.6 s, ...
+     * up to 120 s) and fails calls instantly until the timer fires, even after the node is back. Dropping it when
+     * the node's heartbeat disappears means the node gets a fresh channel, which connects at once, when it returns.
+     */
     public void retainOnly(Set<String> addresses) {
         channels.entrySet().removeIf(e -> {
             if (addresses.contains(e.getKey())) return false;

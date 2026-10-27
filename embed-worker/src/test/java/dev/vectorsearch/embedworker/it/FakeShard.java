@@ -30,7 +30,12 @@ public final class FakeShard implements AutoCloseable {
     private final Server server;
 
     public FakeShard() throws Exception {
-        server = NettyServerBuilder.forPort(0).addService(new ShardServiceGrpc.ShardServiceImplBase() {
+        this(0);
+    }
+
+    /** @param port fixed port (to simulate a node restarting at the same address), 0 = random */
+    public FakeShard(int port) throws Exception {
+        server = NettyServerBuilder.forPort(port).addService(new ShardServiceGrpc.ShardServiceImplBase() {
             @Override
             public void upsert(UpsertRequest req, StreamObserver<UpsertResponse> out) {
                 if (down || failNextCalls.getAndUpdate(n -> Math.max(0, n - 1)) > 0) {
@@ -54,6 +59,10 @@ public final class FakeShard implements AutoCloseable {
                 out.onCompleted();
             }
         }).build().start();
+    }
+
+    public int port() {
+        return server.getPort();
     }
 
     public String target() {

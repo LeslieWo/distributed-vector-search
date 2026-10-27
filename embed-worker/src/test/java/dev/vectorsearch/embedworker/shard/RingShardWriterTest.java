@@ -107,4 +107,27 @@ class RingShardWriterTest {
         }
         assertTrue(shards.get("node-4").totalUpserts.get() > 0);
     }
+
+    /**
+     * A node that was unreachable for a while and comes back must be usable at once. Without dropping its channel
+     * when the heartbeat vanished, gRPC's reconnect backoff kept failing calls for many seconds (BUILDLOG step 26).
+     */
+    @Test
+    void aNodeThatComesBackIsWrittenToImmediately() throws Exception {
+        int port = shards.get("node-2").port();
+        shards.get("node-2").close(); // crash: connection refused from now on
+        long until = System.currentTimeMillis() + 4000; // keep failing for 4 s so the channel backoff grows
+        while (System.currentTimeMillis() < until) {
+            assertThrows(ShardWriteException.class, () -> writer.write(chunks(30)));
+            Thread.sleep(50);
+        }
+        view.set(view(view.get().ring(), null, Set.of("node-1", "node-3", "node-4"))); // heartbeat expired
+        assertThrows(ShardWriteException.class, () -> writer.write(chunks(30)));
+        shards.put("node-2", new FakeShard(port)); // restarted at the same address, heartbeat is back
+        view.set(view(view.get().ring(), null, Set.of("node-1", "node-2", "node-3", "node-4")));
+        long t0 = System.nanoTime();
+        writer.write(chunks(30)); // must not throw
+        assertTrue((System.nanoTime() - t0) / 1_000_000 < 1000);
+        assertTrue(shards.get("node-2").totalUpserts.get() > 0);
+    }
 }

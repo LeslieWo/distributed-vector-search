@@ -38,6 +38,7 @@ public final class RingShardWriter implements ShardWriter {
     private final ClusterViewSource cluster;
     private final ChannelPool channels;
     private final long deadlineMillis;
+    private ClusterView lastView; // written only by the consumer thread
 
     public RingShardWriter(ClusterViewSource cluster, ChannelPool channels, long deadlineMillis) {
         this.cluster = cluster;
@@ -48,6 +49,10 @@ public final class RingShardWriter implements ShardWriter {
     @Override
     public void write(List<EmbeddedChunk> chunks) {
         ClusterView view = cluster.view();
+        if (view != lastView) {
+            channels.retainOnly(new java.util.HashSet<>(view.live().values())); // see ChannelPool: fresh channel on return
+            lastView = view;
+        }
         if (!view.hasRing()) throw new ShardWriteException("no ring in cluster metadata yet (run ClusterAdmin init)", true, null);
         Map<String, UpsertRequest.Builder> perNode = new LinkedHashMap<>();
         for (EmbeddedChunk c : chunks) {
