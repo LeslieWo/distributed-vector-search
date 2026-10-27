@@ -5,6 +5,7 @@ import dev.vectorsearch.embedding.Embedder;
 import dev.vectorsearch.embedding.HashingEmbedder;
 import dev.vectorsearch.embedding.MiniLmEmbedder;
 import dev.vectorsearch.embedworker.consumer.ChunkConsumer;
+import dev.vectorsearch.embedworker.consumer.DeadLetterPublisher;
 import dev.vectorsearch.embedworker.consumer.WorkerMetrics;
 import dev.vectorsearch.embedworker.pipeline.ChunkEmbedder;
 import dev.vectorsearch.embedworker.shard.ShardWriter;
@@ -45,6 +46,7 @@ public class EmbedWorkerApplication {
     @Bean
     ChunkConsumer chunkConsumer(WorkerProperties props, Embedder embedder, ShardWriter writer, MeterRegistry registry) {
         TopicInitializer.ensure(props.bootstrapServers(), props.replicationFactor());
-        return new ChunkConsumer(props, new ChunkEmbedder(embedder), writer, new WorkerMetrics(registry));
+        return new ChunkConsumer(props, new ChunkEmbedder(embedder), writer,
+                new DeadLetterPublisher(props.bootstrapServers()), new WorkerMetrics(registry));
     }
 }

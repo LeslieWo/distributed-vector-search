@@ -44,6 +44,7 @@ public class ChunkConsumer implements SmartLifecycle, Runnable {
     private final WorkerProperties props;
     private final ChunkEmbedder embedder;
     private final ShardWriter writer;
+    private final DeadLetterPublisher dlq;
     private final WorkerMetrics metrics;
     private final MicroBatcher<ConsumerRecord<String, byte[]>> batcher;
     private final Set<TopicPartition> assigned = new HashSet<>();
@@ -51,10 +52,11 @@ public class ChunkConsumer implements SmartLifecycle, Runnable {
     private volatile boolean running;
     private Thread thread;
 
-    public ChunkConsumer(WorkerProperties props, ChunkEmbedder embedder, ShardWriter writer, WorkerMetrics metrics) {
+    public ChunkConsumer(WorkerProperties props, ChunkEmbedder embedder, ShardWriter writer, DeadLetterPublisher dlq, WorkerMetrics metrics) {
         this.props = props;
         this.embedder = embedder;
         this.writer = writer;
+        this.dlq = dlq;
         this.metrics = metrics;
         this.batcher = new MicroBatcher<>(props.batchSize(), props.batchMaxWait().toMillis(), System::currentTimeMillis);
     }
@@ -100,27 +102,93 @@ public class ChunkConsumer implements SmartLifecycle, Runnable {
         }
     }
 
+    /** A failure that retrying the same input cannot fix (bad data, model error, INVALID_ARGUMENT). */
+    static final class PermanentFailure extends RuntimeException {
+        PermanentFailure(String msg, Throwable cause) {
+            super(msg, cause);
+        }
+    }
+
     void processAndCommit(List<ConsumerRecord<String, byte[]>> records) {
         // Same chunk id twice in one batch (re-ingest, redelivery): keep the latest, embed once.
         // Same key = same partition, and records arrive in offset order, so "last" = newest.
         Map<String, Chunk> latest = new LinkedHashMap<>();
+        Map<String, ConsumerRecord<String, byte[]>> sourceOf = new HashMap<>();
         for (ConsumerRecord<String, byte[]> r : records) {
+            Chunk c;
             try {
-                Chunk c = RawChunkCodec.toChunk(RawChunkCodec.decode(r.value()));
-                latest.remove(c.id().value());
-                latest.put(c.id().value(), c);
+                c = RawChunkCodec.toChunk(RawChunkCodec.decode(r.value()));
             } catch (IllegalArgumentException poison) {
-                log.warn("skipping undecodable record {}-{}@{}: {}", r.topic(), r.partition(), r.offset(), poison.getMessage());
+                // Deterministic: decoding the same bytes again fails again, so no retries.
+                deadLetter(r, "undecodable", poison.getMessage(), 1);
+                continue;
             }
+            latest.remove(c.id().value());
+            latest.put(c.id().value(), c);
+            sourceOf.put(c.id().value(), r);
         }
         List<Chunk> chunks = new ArrayList<>(latest.values());
         if (!chunks.isEmpty()) {
             metrics.batchSize.record(chunks.size());
-            List<EmbeddedChunk> embedded = metrics.embed.record(() -> embedder.embed(chunks));
-            writeWithRetry(embedded);
-            metrics.written.increment(embedded.size());
+            try {
+                embedAndWrite(chunks);
+            } catch (PermanentFailure batchFailed) {
+                // One bad chunk must not block the other 63: retry them one by one, dead-letter the culprits.
+                log.warn("batch of {} failed permanently ({}); isolating per chunk", chunks.size(), batchFailed.getMessage());
+                for (Chunk c : chunks) processSingle(c, sourceOf.get(c.id().value()));
+            }
         }
         commit(records);
+    }
+
+    private void processSingle(Chunk c, ConsumerRecord<String, byte[]> source) {
+        long backoff = props.retryBackoffInitial().toMillis();
+        for (int attempt = 1; ; attempt++) {
+            try {
+                embedAndWrite(List.of(c));
+                return;
+            } catch (PermanentFailure e) {
+                if (attempt >= props.maxAttempts()) {
+                    deadLetter(source, "permanent-failure", String.valueOf(e.getCause()), attempt);
+                    return;
+                }
+                waitPolling(backoff); // bounded retries: a "permanent" error is occasionally a fluke
+                backoff = Math.min(backoff * 2, props.retryBackoffMax().toMillis());
+            }
+        }
+    }
+
+    private void embedAndWrite(List<Chunk> chunks) {
+        List<EmbeddedChunk> embedded;
+        try {
+            embedded = metrics.embed.record(() -> embedder.embed(chunks));
+        } catch (RuntimeException e) {
+            throw new PermanentFailure("embedding failed", e);
+        }
+        try {
+            writeWithRetry(embedded);
+        } catch (ShardWriteException e) {
+            throw new PermanentFailure("shard rejected write", e); // non-retriable ones only reach here
+        }
+        metrics.written.increment(embedded.size());
+    }
+
+    /** DLQ writes must succeed before we commit past the record, so they are retried like shard writes. */
+    private void deadLetter(ConsumerRecord<String, byte[]> r, String reason, String error, int attempts) {
+        long backoff = props.retryBackoffInitial().toMillis();
+        while (true) {
+            try {
+                dlq.publish(r, reason, error, attempts);
+                metrics.dlq.increment();
+                log.warn("dead-lettered {}-{}@{} key={} reason={} attempts={}", r.topic(), r.partition(), r.offset(), r.key(), reason, attempts);
+                return;
+            } catch (IllegalStateException e) {
+                if (!running) throw e;
+                log.warn("DLQ write failed, retrying in {} ms: {}", backoff, e.getMessage());
+                waitPolling(backoff);
+                backoff = Math.min(backoff * 2, props.retryBackoffMax().toMillis());
+            }
+        }
     }
 
     /**
@@ -131,29 +199,31 @@ public class ChunkConsumer implements SmartLifecycle, Runnable {
      */
     private void writeWithRetry(List<EmbeddedChunk> embedded) {
         long backoff = props.retryBackoffInitial().toMillis();
-        boolean paused = false;
-        try {
-            while (true) {
-                try {
-                    metrics.write.record(() -> writer.write(embedded));
-                    return;
-                } catch (ShardWriteException e) {
-                    if (!e.retriable()) throw e;
-                    // shutting down: give up without committing; the batch is redelivered after restart
-                    if (!running) throw new IllegalStateException("stopped while shard writes were failing", e);
-                    metrics.retries.increment();
-                    log.warn("shard write failed, retrying in {} ms: {}", backoff, e.getMessage());
-                    paused = true;
-                    waitPolling(backoff);
-                    backoff = Math.min(backoff * 2, props.retryBackoffMax().toMillis());
-                }
+        while (true) {
+            try {
+                metrics.write.record(() -> writer.write(embedded));
+                return;
+            } catch (ShardWriteException e) {
+                if (!e.retriable()) throw e;
+                // shutting down: give up without committing; the batch is redelivered after restart
+                if (!running) throw new IllegalStateException("stopped while shard writes were failing", e);
+                metrics.retries.increment();
+                log.warn("shard write failed, retrying in {} ms: {}", backoff, e.getMessage());
+                waitPolling(backoff);
+                backoff = Math.min(backoff * 2, props.retryBackoffMax().toMillis());
             }
-        } finally {
-            if (paused) consumer.resume(consumer.paused());
         }
     }
 
     private void waitPolling(long millis) {
+        try {
+            waitPaused(millis);
+        } finally {
+            consumer.resume(consumer.paused());
+        }
+    }
+
+    private void waitPaused(long millis) {
         long until = System.currentTimeMillis() + millis;
         long left;
         while ((left = until - System.currentTimeMillis()) > 0) {

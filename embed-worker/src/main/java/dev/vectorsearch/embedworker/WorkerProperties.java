@@ -19,7 +19,8 @@ public record WorkerProperties(
         String shardPartition,
         Duration shardDeadline,
         Duration retryBackoffInitial,
-        Duration retryBackoffMax) {
+        Duration retryBackoffMax,
+        int maxAttempts) {
 
     public WorkerProperties {
         if (bootstrapServers == null || bootstrapServers.isBlank()) bootstrapServers = "localhost:9092";
@@ -36,5 +37,6 @@ public record WorkerProperties(
         if (shardDeadline == null) shardDeadline = Duration.ofSeconds(10);
         if (retryBackoffInitial == null) retryBackoffInitial = Duration.ofMillis(200);
         if (retryBackoffMax == null) retryBackoffMax = Duration.ofSeconds(5);
+        if (maxAttempts <= 0) maxAttempts = 3;
     }
 }
