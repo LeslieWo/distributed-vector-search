@@ -9,6 +9,7 @@ import dev.vectorsearch.proto.v1.SearchServiceGrpc;
 import io.grpc.Context;
 import io.grpc.Deadline;
 import io.grpc.Status;
+import io.grpc.StatusRuntimeException;
 import io.grpc.stub.StreamObserver;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -84,8 +85,21 @@ public class SearchServiceImpl extends SearchServiceGrpc.SearchServiceImplBase {
             out.onError(Status.INTERNAL.withDescription("embedding failed: " + e).asRuntimeException());
             return;
         }
-        ShardSearcher.Result r = searcher.search(query, k, deadline);
-        SearchResponse resp = SearchResponse.newBuilder().addAllHits(r.hits()).setPartial(!r.missingPartitions().isEmpty()).build();
+        ShardSearcher.Result r;
+        try {
+            r = searcher.search(query, k, deadline);
+        } catch (StatusRuntimeException e) {
+            out.onError(e);
+            return;
+        }
+        if (r.hits().isEmpty() && !r.missingPartitions().isEmpty() && r.missingPartitions().size() == r.partitionCount()) {
+            // Nothing answered: an empty "partial" list would look like "no matches". Fail so the client retries.
+            out.onError(Status.UNAVAILABLE.withDescription("no partition could be searched: " + r.missingPartitions()).asRuntimeException());
+            return;
+        }
+        // Partial results policy (step 36): answer with what we have, flagged, and say which partitions are missing.
+        SearchResponse resp = SearchResponse.newBuilder().addAllHits(r.hits())
+                .setPartial(!r.missingPartitions().isEmpty()).addAllMissingPartitions(r.missingPartitions()).build();
         if (resp.getPartial()) partialCounter.increment();
         if (cache != null) cache.put(text, k, resp); // skips partial responses
         record(t0, "miss", resp.getPartial());

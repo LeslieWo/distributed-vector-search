@@ -114,6 +114,9 @@ message SearchRequest {
 
 message SearchResponse {
   repeated ScoredChunk hits = 1;
-  // True when at least one partition could not be searched (Phase 4 partial results).
+  // True when at least one partition could not be searched: both of its replicas failed or ran out of time.
+  // The hits are then the best of the partitions that did answer (step 36).
   bool partial = 2;
+  // Partition ids (e.g. "node-1.node-2") that are missing from this answer; empty when partial = false.
+  repeated string missing_partitions = 3;
 }

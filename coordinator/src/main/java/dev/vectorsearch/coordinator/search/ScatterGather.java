@@ -140,7 +140,7 @@ public final class ScatterGather implements ShardSearcher {
                 results.add(r);
             }
         });
-        return new Result(TopKMerger.merge(results.stream().map(PartitionResult::hits).toList(), k), missing);
+        return new Result(TopKMerger.merge(results.stream().map(PartitionResult::hits).toList(), k), missing, calls.size());
     }
 
     /** One partition's request: first choice, optional hedge, first success wins. */

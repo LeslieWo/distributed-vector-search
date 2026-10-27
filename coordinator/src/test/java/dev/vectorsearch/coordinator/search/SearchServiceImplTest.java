@@ -40,7 +40,7 @@ class SearchServiceImplTest {
         ShardSearcher fake = (query, k, deadline) -> {
             seenQuery.set(query);
             seenDeadline.set(deadline);
-            return new ShardSearcher.Result(List.of(ScoredChunk.newBuilder().setChunkId("1#0").setScore(0.5f).setText("t").build()), List.of());
+            return new ShardSearcher.Result(List.of(ScoredChunk.newBuilder().setChunkId("1#0").setScore(0.5f).setText("t").build()), List.of(), 3);
         };
         CoordinatorProperties props = new CoordinatorProperties(0, 4, null, null, "hashing", null, 10, 100, 0, null, null, null, null, false, null, null, 0, false, null, null);
         String name = InProcessServerBuilder.generateName();
