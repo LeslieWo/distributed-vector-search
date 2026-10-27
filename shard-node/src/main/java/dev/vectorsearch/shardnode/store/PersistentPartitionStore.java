@@ -21,9 +21,12 @@ import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 import org.slf4j.Logger;
@@ -32,6 +35,10 @@ import org.slf4j.LoggerFactory;
 /**
  * Partition store that survives restarts: periodic per-partition HNSW snapshots + a write-ahead log
  * of everything applied since the last snapshot.
+ *
+ * <p>Snapshot triggers: every {@code snapshotInterval}, or earlier once the WAL grows past
+ * {@code snapshotWalBytes} (replay time is proportional to WAL size). Only partitions written since the
+ * last snapshot are rewritten.
  *
  * <p>Startup: load every {@code <partition>.hnsw}, then replay {@code wal.log}. Replaying a write that
  * is already in the snapshot is harmless because upserts are idempotent by chunk id, so the snapshot
@@ -47,6 +54,8 @@ public class PersistentPartitionStore extends PartitionStore implements AutoClos
     // files it writes and the WAL truncation see a frozen state. Searches never take this lock.
     private final ReentrantReadWriteLock writeGate = new ReentrantReadWriteLock();
     private final AtomicLong writesSinceSnapshot = new AtomicLong();
+    private final Set<String> dirty = ConcurrentHashMap.newKeySet(); // partitions with writes not in a snapshot
+    private final AtomicBoolean walSnapshotQueued = new AtomicBoolean();
     private final ScheduledExecutorService scheduler;
     private volatile SnapshotListener listener = (millis, partitions) -> {};
 
@@ -98,9 +107,11 @@ public class PersistentPartitionStore extends PartitionStore implements AutoClos
                     for (int i = 0; i < v.length; i++) v[i] = c.getVector(i);
                     entries.add(new Entry(c.getChunkId(), c.getPartition(), v, c.getText()));
                 }
+                entries.forEach(e -> dirty.add(e.partition()));
                 super.upsert(entries);
             } else if (type == WriteAheadLog.DELETE) {
                 DeleteRequest d = DeleteRequest.parseFrom(payload);
+                dirty.add(d.getPartition());
                 super.delete(d.getPartition(), d.getChunkIdsList());
             }
         } catch (InvalidProtocolBufferException e) {
@@ -120,11 +131,13 @@ public class PersistentPartitionStore extends PartitionStore implements AutoClos
         try {
             wal.append(WriteAheadLog.UPSERT, rec.build().toByteArray()); // durable before applied/acked
             writesSinceSnapshot.incrementAndGet();
+            entries.forEach(e -> dirty.add(e.partition()));
             return super.upsert(entries);
         } catch (IOException e) {
             throw new UncheckedIOException("WAL append failed", e);
         } finally {
             writeGate.readLock().unlock();
+            maybeSnapshotForWalSize();
         }
     }
 
@@ -134,21 +147,44 @@ public class PersistentPartitionStore extends PartitionStore implements AutoClos
         try {
             wal.append(WriteAheadLog.DELETE, DeleteRequest.newBuilder().setPartition(partition).addAllChunkIds(chunkIds).build().toByteArray());
             writesSinceSnapshot.incrementAndGet();
+            dirty.add(partition);
             return super.delete(partition, chunkIds);
         } catch (IOException e) {
             throw new UncheckedIOException("WAL append failed", e);
         } finally {
             writeGate.readLock().unlock();
+            maybeSnapshotForWalSize();
         }
     }
 
-    /** Writes every partition to {@code <partition>.hnsw} (tmp file + fsync + atomic rename), then empties the WAL. */
+    /** Queues one background snapshot when the WAL is over the size threshold (never on the caller's thread). */
+    private void maybeSnapshotForWalSize() {
+        if (walSizeBytes() < properties().snapshotWalBytes() || !walSnapshotQueued.compareAndSet(false, true)) return;
+        try {
+            scheduler.execute(() -> {
+                try {
+                    log.info("WAL passed {} bytes, snapshotting early", properties().snapshotWalBytes());
+                    snapshotQuietly();
+                } finally {
+                    walSnapshotQueued.set(false);
+                }
+            });
+        } catch (java.util.concurrent.RejectedExecutionException closing) {
+            walSnapshotQueued.set(false);
+        }
+    }
+
+    /**
+     * Writes every partition changed since the last snapshot to {@code <partition>.hnsw} (tmp file + fsync +
+     * atomic rename), then empties the WAL. Unchanged partitions keep their existing, still exact file.
+     */
     public void snapshot() throws IOException {
         writeGate.writeLock().lock();
         try {
             if (writesSinceSnapshot.get() == 0) return;
             long t0 = System.nanoTime();
             for (Map.Entry<String, HnswVectorIndex> e : partitions.entrySet()) {
+                if (!dirty.contains(e.getKey())) continue;
                 Path target = dir.resolve(e.getKey() + SNAPSHOT_SUFFIX);
                 Path tmp = dir.resolve(e.getKey() + SNAPSHOT_SUFFIX + ".tmp");
                 try (OutputStream out = new BufferedOutputStream(Files.newOutputStream(tmp), 1 << 20)) {
@@ -162,9 +198,11 @@ public class PersistentPartitionStore extends PartitionStore implements AutoClos
             }
             wal.truncate();
             writesSinceSnapshot.set(0);
+            int written = dirty.size();
+            dirty.clear();
             long millis = (System.nanoTime() - t0) / 1_000_000;
-            log.info("snapshot of {} written in {} ms", sizes(), millis);
-            listener.onSnapshot(millis, partitions.size());
+            log.info("snapshot of {} written in {} ms ({} changed partitions)", sizes(), millis, written);
+            listener.onSnapshot(millis, written);
         } finally {
             writeGate.writeLock().unlock();
         }

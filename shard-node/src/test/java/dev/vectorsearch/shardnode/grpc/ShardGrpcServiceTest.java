@@ -33,7 +33,7 @@ class ShardGrpcServiceTest {
     ShardServiceGrpc.ShardServiceBlockingStub stub;
 
     static ShardNodeProperties props(int dim) {
-        return new ShardNodeProperties("node-1", 0, dim, 16, 100, 32, 16, 100, 2, null, null);
+        return new ShardNodeProperties("node-1", 0, dim, 16, 100, 32, 16, 100, 2, null, null, 0);
     }
 
     @BeforeEach

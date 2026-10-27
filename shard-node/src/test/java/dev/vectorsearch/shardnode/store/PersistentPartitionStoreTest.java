@@ -21,7 +21,11 @@ class PersistentPartitionStoreTest {
     Path dir;
 
     ShardNodeProperties props() {
-        return new ShardNodeProperties("node-1", 0, 3, 16, 100, 32, 16, 100, 2, dir, Duration.ofHours(1));
+        return props(0);
+    }
+
+    ShardNodeProperties props(long snapshotWalBytes) {
+        return new ShardNodeProperties("node-1", 0, 3, 16, 100, 32, 16, 100, 2, dir, Duration.ofHours(1), snapshotWalBytes);
     }
 
     static PartitionStore.Entry e(String id, String partition, float... v) {
@@ -83,5 +87,33 @@ class PersistentPartitionStoreTest {
         PersistentPartitionStore recovered = new PersistentPartitionStore(props());
         assertEquals(Map.of("p", 1L), recovered.sizes());
         recovered.close();
+    }
+
+    @Test
+    void walOverThresholdTriggersEarlySnapshot() throws Exception {
+        PersistentPartitionStore s = new PersistentPartitionStore(props(300)); // one 3-d record is ~50 bytes
+        for (int i = 0; i < 10; i++) s.upsert(List.of(e("x" + i + "#0", "p", 1, i, 0)));
+        long deadline = System.currentTimeMillis() + 10_000;
+        while (!Files.exists(dir.resolve("p.hnsw")) && System.currentTimeMillis() < deadline) Thread.sleep(20);
+        assertTrue(Files.exists(dir.resolve("p.hnsw")), "interval is 1 h, only the WAL-size trigger can have written this");
+        assertTrue(Files.size(dir.resolve("wal.log")) < 300 * 2, "WAL was truncated by the early snapshot");
+        s.close();
+        assertEquals(Map.of("p", 10L), new PersistentPartitionStore(props()).sizes());
+    }
+
+    @Test
+    void onlyChangedPartitionsAreRewritten() throws Exception {
+        PersistentPartitionStore s = new PersistentPartitionStore(props());
+        s.upsert(List.of(e("a#0", "pa", 1, 0, 0), e("b#0", "pb", 0, 1, 0)));
+        s.snapshot();
+        var pbTime = Files.getLastModifiedTime(dir.resolve("pb.hnsw"));
+        var paTime = Files.getLastModifiedTime(dir.resolve("pa.hnsw"));
+        Thread.sleep(20);
+        s.upsert(List.of(e("c#0", "pa", 0, 0, 1)));
+        s.snapshot();
+        assertEquals(pbTime, Files.getLastModifiedTime(dir.resolve("pb.hnsw")));
+        assertTrue(Files.getLastModifiedTime(dir.resolve("pa.hnsw")).compareTo(paTime) > 0);
+        s.close();
+        assertEquals(Map.of("pa", 2L, "pb", 1L), new PersistentPartitionStore(props()).sizes());
     }
 }

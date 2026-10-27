@@ -17,7 +17,8 @@ public record ShardNodeProperties(
         int maxK,
         int grpcThreads,
         Path dataDir,
-        Duration snapshotInterval) {
+        Duration snapshotInterval,
+        long snapshotWalBytes) {
 
     public ShardNodeProperties {
         if (nodeId == null || nodeId.isBlank()) nodeId = "node-1";
@@ -31,5 +32,7 @@ public record ShardNodeProperties(
         if (grpcThreads <= 0) grpcThreads = Runtime.getRuntime().availableProcessors() * 2;
         if (dataDir == null) dataDir = Path.of("data/snapshots", nodeId);
         if (snapshotInterval == null) snapshotInterval = Duration.ofMinutes(5);
+        // Snapshot early once the WAL passes this size, bounding replay time after a crash (BUILDLOG step 22).
+        if (snapshotWalBytes <= 0) snapshotWalBytes = 64L << 20;
     }
 }

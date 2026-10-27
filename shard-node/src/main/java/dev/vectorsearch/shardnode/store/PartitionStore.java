@@ -1,6 +1,7 @@
 package dev.vectorsearch.shardnode.store;
 
 import dev.vectorsearch.shardnode.ShardNodeProperties;
+import dev.vectorsearch.shardnode.index.ChunkItem;
 import dev.vectorsearch.shardnode.index.Hit;
 import dev.vectorsearch.shardnode.index.HnswVectorIndex;
 import java.util.LinkedHashMap;
@@ -53,6 +54,12 @@ public class PartitionStore {
     public List<Hit> search(String partition, float[] query, int k, int ef) {
         HnswVectorIndex index = partitions.get(partition);
         return index == null ? List.of() : index.search(query, k, ef);
+    }
+
+    /** Live items of one partition (empty if unknown). */
+    public List<ChunkItem> items(String partition) {
+        HnswVectorIndex index = partitions.get(partition);
+        return index == null ? List.of() : index.items();
     }
 
     public long size(String partition) {

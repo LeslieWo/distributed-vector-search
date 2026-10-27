@@ -134,6 +134,16 @@ public final class HnswVectorIndex implements VectorIndex {
         return hits;
     }
 
+    /** Snapshot of the live items (soft-deleted ones excluded). Used by scans for rebalancing and checks. */
+    public List<ChunkItem> items() {
+        resizeLock.readLock().lock();
+        try {
+            return new ArrayList<>(index.items());
+        } finally {
+            resizeLock.readLock().unlock();
+        }
+    }
+
     @Override
     public int size() {
         return index.size();
