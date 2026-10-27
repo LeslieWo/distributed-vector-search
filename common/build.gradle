@@ -27,3 +27,10 @@ tasks.register('ensureTopics', JavaExec) {
     mainClass = 'dev.vectorsearch.common.kafka.TopicInitializer'
     args project.findProperty('bootstrap') ?: 'localhost:9092'
 }
+
+tasks.register('ringStats', JavaExec) {
+    description = 'Consistent-hash ring balance vs vnode count, and key movement when a 4th node joins'
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'dev.vectorsearch.common.ring.RingStats'
+    if (project.hasProperty('args')) args project.property('args').split(' ')
+}
