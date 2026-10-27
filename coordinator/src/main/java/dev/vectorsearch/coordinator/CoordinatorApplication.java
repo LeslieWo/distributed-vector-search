@@ -13,6 +13,7 @@ import dev.vectorsearch.common.cluster.ViewAcker;
 import dev.vectorsearch.coordinator.search.AdaptiveHedgePolicy;
 import dev.vectorsearch.coordinator.search.HedgeBudget;
 import dev.vectorsearch.coordinator.search.HedgePolicy;
+import dev.vectorsearch.coordinator.search.NodeHealth;
 import dev.vectorsearch.coordinator.search.NodeStats;
 import dev.vectorsearch.coordinator.search.PowerOfTwoChoicesSelector;
 import dev.vectorsearch.coordinator.search.ReplicaSelector;
@@ -87,8 +88,8 @@ public class CoordinatorApplication {
                                 NodeStats stats, MeterRegistry registry) {
         HedgePolicy hedge = props.hedging()
                 ? new AdaptiveHedgePolicy(props.hedgeMinDelay().toNanos(), props.hedgeInitialDelay().toNanos()) : null;
-        return new ScatterGather(cluster, channels, selector, stats, props.efSearch(), props.responseReserve(), props.shardTimeout(),
-                hedge, new HedgeBudget(props.hedgeBudgetRatio(), 10), registry);
+        return new ScatterGather(cluster, channels, selector, stats, new NodeHealth(), props.efSearch(), props.responseReserve(),
+                props.shardTimeout(), hedge, new HedgeBudget(props.hedgeBudgetRatio(), 10), registry);
     }
 
     /**

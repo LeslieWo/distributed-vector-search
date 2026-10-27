@@ -37,7 +37,7 @@ class HedgingIT {
     ScatterGather sg(ReplicaSelector selector, HedgePolicy policy, double budget) {
         NodeStats stats = new NodeStats();
         if (selector == null) selector = new PowerOfTwoChoicesSelector(stats);
-        return new ScatterGather(c.view, c.channels, selector, stats, 0, Duration.ofMillis(5), Duration.ofMillis(500),
+        return new ScatterGather(c.view, c.channels, selector, stats, new NodeHealth(), 0, Duration.ofMillis(5), Duration.ofMillis(500),
                 policy, policy == null ? null : new HedgeBudget(budget, 10), new SimpleMeterRegistry());
     }
 

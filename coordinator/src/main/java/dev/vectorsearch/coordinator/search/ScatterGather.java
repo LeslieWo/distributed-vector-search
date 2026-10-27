@@ -43,6 +43,7 @@ public final class ScatterGather implements ShardSearcher {
     private final ChannelPool channels;
     private final ReplicaSelector selector;
     private final NodeStats stats;
+    private final NodeHealth health;
     private final int efSearch;
     private final long reserveMicros;
     private final long shardTimeoutMicros;
@@ -55,6 +56,8 @@ public final class ScatterGather implements ShardSearcher {
     final Counter hedgesWon;
     final Counter hedgesDenied;
     final Counter partitionRequests;
+    final Counter retries;
+    final Counter markedDown;
 
     /**
      * @param responseReserve shards are given the query deadline minus this, so that when they time out the
@@ -62,13 +65,14 @@ public final class ScatterGather implements ShardSearcher {
      * @param shardTimeout    cap on one partition request even when the query deadline is far away
      * @param hedgePolicy     when to hedge; null disables hedging
      */
-    public ScatterGather(ClusterViewSource cluster, ChannelPool channels, ReplicaSelector selector, NodeStats stats, int efSearch,
-                         Duration responseReserve, Duration shardTimeout, HedgePolicy hedgePolicy, HedgeBudget hedgeBudget,
+    public ScatterGather(ClusterViewSource cluster, ChannelPool channels, ReplicaSelector selector, NodeStats stats, NodeHealth health,
+                         int efSearch, Duration responseReserve, Duration shardTimeout, HedgePolicy hedgePolicy, HedgeBudget hedgeBudget,
                          MeterRegistry registry) {
         this.cluster = cluster;
         this.channels = channels;
         this.selector = selector;
         this.stats = stats;
+        this.health = health;
         this.efSearch = efSearch;
         this.reserveMicros = responseReserve.toNanos() / 1000;
         this.shardTimeoutMicros = shardTimeout.toNanos() / 1000;
@@ -78,12 +82,14 @@ public final class ScatterGather implements ShardSearcher {
         this.hedgesWon = Counter.builder("vs.coord.hedge.won").description("hedged requests that answered first").register(registry);
         this.hedgesDenied = Counter.builder("vs.coord.hedge.denied").description("hedges skipped because the budget was empty").register(registry);
         this.partitionRequests = Counter.builder("vs.coord.partition.requests").description("first-choice partition requests").register(registry);
+        this.retries = Counter.builder("vs.coord.retries").description("partition requests retried on the other replica after a failure").register(registry);
+        this.markedDown = Counter.builder("vs.coord.node.marked.down").description("nodes marked down after UNAVAILABLE").register(registry);
     }
 
     /** Without hedging (tests of the earlier steps). */
     public ScatterGather(ClusterViewSource cluster, ChannelPool channels, ReplicaSelector selector, NodeStats stats, int efSearch,
                          Duration responseReserve, Duration shardTimeout) {
-        this(cluster, channels, selector, stats, efSearch, responseReserve, shardTimeout, null, null,
+        this(cluster, channels, selector, stats, new NodeHealth(), efSearch, responseReserve, shardTimeout, null, null,
                 new io.micrometer.core.instrument.simple.SimpleMeterRegistry());
     }
 
@@ -157,8 +163,15 @@ public final class ScatterGather implements ShardSearcher {
             result.whenComplete((r, e) -> cancelAll()); // winner found, gave up, or timed out: stop the rest
         }
 
-        void start() {
+        /** Live holders not marked down; if every live holder is marked down, try them anyway. */
+        private List<String> candidates() {
             List<String> live = ReplicaSelector.liveHolders(partition, view);
+            List<String> up = live.stream().filter(n -> !health.isDown(n)).toList();
+            return up.isEmpty() ? live : up;
+        }
+
+        void start() {
+            List<String> live = candidates();
             if (live.isEmpty()) {
                 result.complete(new PartitionResult(partition, List.of(), "no live holder"));
                 return;
@@ -182,7 +195,7 @@ public final class ScatterGather implements ShardSearcher {
             synchronized (this) {
                 hedgeTimerPending = false;
                 if (result.isDone()) return;
-                other = ReplicaSelector.liveHolders(partition, view).stream().filter(n -> !attempts.containsKey(n)).findFirst().orElse(null);
+                other = untried();
             }
             if (other != null && hedgeBudget.tryAcquire()) {
                 hedgesSent.increment();
@@ -191,6 +204,11 @@ public final class ScatterGather implements ShardSearcher {
             }
             if (other != null) hedgesDenied.increment();
             completeIfAllFailed(); // the first attempt may already have failed while we waited
+        }
+
+        /** A live holder this call has not sent to yet (null if none). Caller holds the lock. */
+        private String untried() {
+            return candidates().stream().filter(n -> !attempts.containsKey(n)).findFirst().orElse(null);
         }
 
         private void completeIfAllFailed() {
@@ -221,11 +239,27 @@ public final class ScatterGather implements ShardSearcher {
 
                 @Override
                 public void onFailure(Throwable t) {
-                    stats.finished(node, System.nanoTime() - t0); // a timeout records the full wait: the node looks slow
-                    if (call.isCancelled()) return; // we cancelled it ourselves (the other attempt won)
+                    long elapsed = System.nanoTime() - t0;
+                    if (call.isCancelled()) { // we cancelled it ourselves (the other attempt won): it was at least this slow
+                        stats.finished(node, elapsed);
+                        return;
+                    }
+                    // A real failure counts as slow (at least the shard timeout): a node refusing connections answers
+                    // in microseconds and would otherwise look like the fastest replica to p2c.
+                    stats.finished(node, Math.max(elapsed, shardTimeoutMicros * 1000));
+                    Status status = Status.fromThrowable(t);
+                    if (status.getCode() == Status.Code.UNAVAILABLE && health.markDown(node)) markedDown.increment();
+                    String retryOn;
                     synchronized (PartitionCall.this) {
                         failed.add(node);
-                        errors.add(node + ": " + Status.fromThrowable(t));
+                        errors.add(node + ": " + status);
+                        // retry right away on the other replica (not budgeted: the failed attempt cost the cluster nothing)
+                        retryOn = result.isDone() || status.getCode() == Status.Code.DEADLINE_EXCEEDED ? null : untried();
+                    }
+                    if (retryOn != null) {
+                        retries.increment();
+                        send(retryOn, false);
+                        return;
                     }
                     completeIfAllFailed();
                 }
@@ -237,9 +271,18 @@ public final class ScatterGather implements ShardSearcher {
         }
     }
 
-    /** Fresh channel for a node that comes back (see ChannelPool.retainOnly, BUILDLOG step 26). */
+    /**
+     * On a membership change: fresh channels for nodes that come back (ChannelPool.retainOnly, BUILDLOG step 26)
+     * and clear their down marks (their heartbeat returned after it had expired, i.e. they restarted).
+     */
     private void syncChannels(ClusterView view) {
         ClusterView prev = lastView.get();
-        if (prev != view && lastView.compareAndSet(prev, view)) channels.retainOnly(new HashSet<>(view.live().values()));
+        if (prev == view || !lastView.compareAndSet(prev, view)) return;
+        channels.retainOnly(new HashSet<>(view.live().values()));
+        if (prev != null) {
+            Set<String> returned = new HashSet<>(view.live().keySet());
+            returned.removeAll(prev.live().keySet());
+            health.heartbeatReturned(returned);
+        }
     }
 }
