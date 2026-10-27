@@ -25,7 +25,7 @@ class DeadlineIT {
     @BeforeEach
     void up() throws Exception {
         c = new ClusterFixture(dir, 600);
-        sg = new ScatterGather(c.view, c.channels, new RoundRobinSelector(), 0, Duration.ofMillis(20), Duration.ofMillis(500));
+        sg = new ScatterGather(c.view, c.channels, new RoundRobinSelector(), new NodeStats(), 0, Duration.ofMillis(20), Duration.ofMillis(500));
     }
 
     @AfterEach

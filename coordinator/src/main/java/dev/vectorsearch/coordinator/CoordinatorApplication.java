@@ -10,6 +10,9 @@ import dev.vectorsearch.embedding.HashingEmbedder;
 import dev.vectorsearch.embedding.MiniLmEmbedder;
 import dev.vectorsearch.common.cluster.ChannelPool;
 import dev.vectorsearch.common.cluster.ViewAcker;
+import dev.vectorsearch.coordinator.search.NodeStats;
+import dev.vectorsearch.coordinator.search.PowerOfTwoChoicesSelector;
+import dev.vectorsearch.coordinator.search.ReplicaSelector;
 import dev.vectorsearch.coordinator.search.RoundRobinSelector;
 import dev.vectorsearch.coordinator.search.ScatterGather;
 import io.grpc.netty.shaded.io.grpc.netty.NettyChannelBuilder;
@@ -61,8 +64,23 @@ public class CoordinatorApplication {
     }
 
     @Bean
-    ShardSearcher shardSearcher(CoordinatorProperties props, RedisClusterView cluster, ChannelPool channels) {
-        return new ScatterGather(cluster, channels, new RoundRobinSelector(), props.efSearch(), props.responseReserve(), props.shardTimeout());
+    NodeStats nodeStats() {
+        return new NodeStats();
+    }
+
+    /** Which holder of a partition gets the request: p2c (latency x in-flight) or round-robin (step 33). */
+    @Bean
+    ReplicaSelector replicaSelector(CoordinatorProperties props, NodeStats stats) {
+        return switch (props.replicaSelection()) {
+            case "p2c" -> new PowerOfTwoChoicesSelector(stats);
+            case "round-robin" -> new RoundRobinSelector();
+            default -> throw new IllegalArgumentException("coordinator.replica-selection must be p2c or round-robin");
+        };
+    }
+
+    @Bean
+    ShardSearcher shardSearcher(CoordinatorProperties props, RedisClusterView cluster, ChannelPool channels, ReplicaSelector selector, NodeStats stats) {
+        return new ScatterGather(cluster, channels, selector, stats, props.efSearch(), props.responseReserve(), props.shardTimeout());
     }
 
     /**

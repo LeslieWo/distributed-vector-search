@@ -36,6 +36,7 @@ public final class ScatterGather implements ShardSearcher {
     private final ClusterViewSource cluster;
     private final ChannelPool channels;
     private final ReplicaSelector selector;
+    private final NodeStats stats;
     private final int efSearch;
     private final long reserveMicros;
     private final long shardTimeoutMicros;
@@ -46,11 +47,12 @@ public final class ScatterGather implements ShardSearcher {
      *                        coordinator still has time to merge and answer with partial results
      * @param shardTimeout    cap on one partition request even when the query deadline is far away
      */
-    public ScatterGather(ClusterViewSource cluster, ChannelPool channels, ReplicaSelector selector, int efSearch,
+    public ScatterGather(ClusterViewSource cluster, ChannelPool channels, ReplicaSelector selector, NodeStats stats, int efSearch,
                          Duration responseReserve, Duration shardTimeout) {
         this.cluster = cluster;
         this.channels = channels;
         this.selector = selector;
+        this.stats = stats;
         this.efSearch = efSearch;
         this.reserveMicros = responseReserve.toNanos() / 1000;
         this.shardTimeoutMicros = shardTimeout.toNanos() / 1000;
@@ -107,17 +109,21 @@ public final class ScatterGather implements ShardSearcher {
         List<String> live = ReplicaSelector.liveHolders(p, view);
         if (live.isEmpty()) return CompletableFuture.completedFuture(new PartitionResult(p, List.of(), "no live holder"));
         String node = selector.choose(p, live);
+        long t0 = System.nanoTime();
+        stats.started(node);
         ListenableFuture<ShardSearchResponse> call = ShardServiceGrpc.newFutureStub(channels.get(view.address(node)))
                 .withDeadline(deadline).search(req);
         CompletableFuture<PartitionResult> out = new CompletableFuture<>();
         Futures.addCallback(call, new FutureCallback<>() {
             @Override
             public void onSuccess(ShardSearchResponse r) {
+                stats.finished(node, System.nanoTime() - t0);
                 out.complete(new PartitionResult(p, r.getHitsList(), null));
             }
 
             @Override
             public void onFailure(Throwable t) {
+                stats.finished(node, System.nanoTime() - t0); // a timeout records the full wait: the node looks slow
                 out.complete(new PartitionResult(p, List.of(), node + ": " + Status.fromThrowable(t)));
             }
         }, MoreExecutors.directExecutor());

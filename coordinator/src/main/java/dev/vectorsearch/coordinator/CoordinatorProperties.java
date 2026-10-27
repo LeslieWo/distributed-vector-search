@@ -19,6 +19,7 @@ public record CoordinatorProperties(
         Duration defaultDeadline,
         Duration responseReserve,
         Duration shardTimeout,
+        String replicaSelection,
         boolean cacheEnabled,
         Duration cacheTtl,
         Duration cacheTimeout) {
@@ -38,6 +39,7 @@ public record CoordinatorProperties(
         if (responseReserve == null) responseReserve = Duration.ofMillis(5);
         // upper bound for one partition request even when the query deadline is far away
         if (shardTimeout == null) shardTimeout = Duration.ofMillis(500);
+        if (replicaSelection == null || replicaSelection.isBlank()) replicaSelection = "p2c";
         if (cacheTtl == null) cacheTtl = Duration.ofSeconds(60);
         if (cacheTimeout == null) cacheTimeout = Duration.ofMillis(50);
     }
