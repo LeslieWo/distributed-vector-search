@@ -1,0 +1,17 @@
+syntax = "proto3";
+
+package vectorsearch.v1;
+
+option java_multiple_files = true;
+option java_package = "dev.vectorsearch.proto.v1";
+option java_outer_classname = "PipelineProto";
+
+// Value of a record on Kafka topic `raw-chunks` (key = chunk_id, UTF-8).
+// Produced by ingest after chunking, consumed by embed-worker.
+message RawChunk {
+  string chunk_id = 1;     // "<doc_id>#<chunk_index>"
+  string doc_id = 2;
+  int32 chunk_index = 3;
+  string text = 4;
+  int64 ingested_at_ms = 5; // wall clock at ingest, for end-to-end freshness lag
+}

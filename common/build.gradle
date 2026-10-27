@@ -5,9 +5,12 @@ dependencies {
     // Boot 3.5.6 pins Testcontainers 1.21.3, whose docker-java speaks API 1.32; Docker 29 (colima) rejects < 1.40.
     testImplementation enforcedPlatform('org.testcontainers:testcontainers-bom:1.21.4')
 
+    api project(':proto')
+    api 'org.apache.kafka:kafka-clients'
+    implementation 'org.slf4j:slf4j-api'
+
     testImplementation 'org.testcontainers:junit-jupiter'
     testImplementation 'org.testcontainers:kafka'
-    testImplementation 'org.apache.kafka:kafka-clients'
     testRuntimeOnly 'org.slf4j:slf4j-simple'
 }
 
@@ -16,4 +19,11 @@ tasks.register('chunkStats', JavaExec) {
     classpath = sourceSets.main.runtimeClasspath
     mainClass = 'dev.vectorsearch.common.chunk.ChunkStats'
     workingDir = rootDir
+}
+
+tasks.register('ensureTopics', JavaExec) {
+    description = 'Creates raw-chunks / raw-chunks.dlq on the local broker if missing (-Pbootstrap=host:port)'
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'dev.vectorsearch.common.kafka.TopicInitializer'
+    args project.findProperty('bootstrap') ?: 'localhost:9092'
 }
