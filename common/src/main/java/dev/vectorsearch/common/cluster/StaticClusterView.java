@@ -9,7 +9,7 @@ public final class StaticClusterView implements ClusterViewSource {
     private final ClusterView view;
 
     public StaticClusterView(Map<String, String> addresses) {
-        this.view = new ClusterView(0, HashRing.of(addresses.keySet()), null, addresses);
+        this.view = new ClusterView(0, HashRing.of(addresses.keySet()), addresses);
     }
 
     public static StaticClusterView parse(String spec) {

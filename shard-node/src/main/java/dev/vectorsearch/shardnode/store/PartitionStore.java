@@ -36,9 +36,14 @@ public class PartitionStore {
      * single-threaded, BUILDLOG step 9). If the batch repeats a chunk id, the last occurrence wins.
      */
     public int upsert(List<Entry> entries) {
+        return upsert(entries, false);
+    }
+
+    /** @param onlyIfAbsent skip ids already present in their partition (rebalance copies) */
+    public int upsert(List<Entry> entries, boolean onlyIfAbsent) {
         Map<String, Entry> lastWins = new LinkedHashMap<>();
         for (Entry e : entries) lastWins.put(e.partition() + "/" + e.chunkId(), e);
-        lastWins.values().parallelStream().forEach(e -> indexFor(e.partition()).upsert(e.chunkId(), e.vector(), e.text()));
+        lastWins.values().parallelStream().forEach(e -> indexFor(e.partition()).upsert(e.chunkId(), e.vector(), e.text(), onlyIfAbsent));
         return entries.size();
     }
 

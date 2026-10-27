@@ -6,6 +6,7 @@ dependencies {
     runtimeOnly 'io.micrometer:micrometer-registry-prometheus'
 
     testImplementation 'io.grpc:grpc-inprocess:1.76.0'
+    testImplementation project(':shard-node') // real shard nodes in the rebalance test
     testImplementation 'org.testcontainers:junit-jupiter'
     testImplementation 'org.testcontainers:kafka'
     testImplementation 'org.awaitility:awaitility'

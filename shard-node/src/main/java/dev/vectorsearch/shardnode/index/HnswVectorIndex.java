@@ -53,10 +53,34 @@ public final class HnswVectorIndex implements VectorIndex {
 
     private final AtomicLong duplicates = new AtomicLong();
     private final AtomicLong replaced = new AtomicLong();
+    private final AtomicLong skippedPresent = new AtomicLong();
+
+    // Upserts of the same id are serialized (check-then-add must be atomic, e.g. a rebalance copy with
+    // onlyIfAbsent racing a live write); different ids almost always take different stripes.
+    private final Object[] idLocks = new Object[256];
+
+    {
+        for (int i = 0; i < idLocks.length; i++) idLocks[i] = new Object();
+    }
 
     @Override
     public void upsert(String id, float[] vector, String text) {
+        upsert(id, vector, text, false);
+    }
+
+    /** @param onlyIfAbsent leave an existing item with this id untouched (rebalance copies, BUILDLOG step 27) */
+    public void upsert(String id, float[] vector, String text, boolean onlyIfAbsent) {
+        synchronized (idLocks[(id.hashCode() & 0x7fffffff) % idLocks.length]) {
+            upsertLocked(id, vector, text, onlyIfAbsent);
+        }
+    }
+
+    private void upsertLocked(String id, float[] vector, String text, boolean onlyIfAbsent) {
         ChunkItem existing = index.get(id).orElse(null);
+        if (existing != null && onlyIfAbsent) {
+            skippedPresent.incrementAndGet();
+            return;
+        }
         if (existing != null) {
             if (Objects.equals(existing.text(), text) && nearlyEqual(existing.vector(), vector)) {
                 // Duplicate delivery (at-least-once). Skip: hnswlib would treat a vector that differs in the
@@ -99,6 +123,11 @@ public final class HnswVectorIndex implements VectorIndex {
     /** Upserts skipped as duplicates since this index object was created. */
     public long duplicateUpserts() {
         return duplicates.get();
+    }
+
+    /** onlyIfAbsent upserts skipped because the id was already there. */
+    public long skippedPresent() {
+        return skippedPresent.get();
     }
 
     /** Upserts that replaced an existing vector (each leaves one soft-deleted node in the graph). */

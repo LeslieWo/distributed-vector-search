@@ -37,7 +37,7 @@ public final class RedisClusterView implements ClusterViewSource {
     private final ScheduledExecutorService timer =
             Executors.newSingleThreadScheduledExecutor(Thread.ofPlatform().name("cluster-view").daemon().factory());
     private final List<Consumer<ClusterView>> listeners = new CopyOnWriteArrayList<>();
-    private volatile ClusterView view = new ClusterView(-1, null, null, Map.of());
+    private volatile ClusterView view = new ClusterView(-1, null, Map.of());
     private volatile boolean failing;
 
     public RedisClusterView(String redisUri, Duration pollInterval) {
@@ -80,13 +80,13 @@ public final class RedisClusterView implements ClusterViewSource {
             ClusterView old = view;
             HashRing r = ring == null ? null : sameNodes(old.ring(), ring.nodes()) ? old.ring() : HashRing.of(ring.nodes());
             HashRing p = pending == null ? null : sameNodes(old.pending(), pending.nodes()) ? old.pending() : HashRing.of(pending.nodes());
-            ClusterView next = new ClusterView(ring == null ? -1 : ring.version(), r, p, live);
+            ClusterView next = new ClusterView(ring == null ? -1 : ring.version(), r, pending == null ? -1 : pending.version(), p, live);
             if (failing) log.info("Redis reachable again");
             failing = false;
             if (!next.equals(old)) {
                 view = next;
                 log.info("cluster view: ring v{} {} pending {} live {}", next.ringVersion(), r == null ? "-" : r.nodes(),
-                        p == null ? "-" : p.nodes(), live.keySet());
+                        p == null ? "-" : "v" + next.pendingVersion() + " " + p.nodes(), live.keySet());
                 for (Consumer<ClusterView> l : listeners) {
                     try {
                         l.accept(next);

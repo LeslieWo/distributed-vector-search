@@ -46,8 +46,18 @@ public final class RingShardWriter implements ShardWriter {
         this.deadlineMillis = deadlineMillis;
     }
 
+    /**
+     * The ring versions this writer is on, for the rebalance barrier ({@code ViewAcker}). Taking the writer's
+     * lock means no write that started with an older view is still in flight, and every later write calls
+     * {@code cluster.view()} again, so it uses at least these versions.
+     */
+    public synchronized String ackState() {
+        ClusterView v = cluster.view();
+        return dev.vectorsearch.common.cluster.ViewAcker.state(v.ringVersion(), v.pendingVersion());
+    }
+
     @Override
-    public void write(List<EmbeddedChunk> chunks) {
+    public synchronized void write(List<EmbeddedChunk> chunks) {
         ClusterView view = cluster.view();
         if (view != lastView) {
             channels.retainOnly(new java.util.HashSet<>(view.live().values())); // see ChannelPool: fresh channel on return

@@ -2,6 +2,7 @@ package dev.vectorsearch.shardnode.grpc;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import dev.vectorsearch.proto.v1.ChunkVector;
 import dev.vectorsearch.proto.v1.DeleteRequest;
@@ -122,5 +123,50 @@ class ShardGrpcServiceTest {
     private static void assertInvalid(Runnable call) {
         StatusRuntimeException e = assertThrows(StatusRuntimeException.class, call::run);
         assertEquals(Status.Code.INVALID_ARGUMENT, e.getStatus().getCode());
+    }
+
+    @Test
+    void onlyIfAbsentNeverOverwritesAnExistingChunk() {
+        stub.upsert(UpsertRequest.newBuilder().addChunks(chunk("a#0", "p", 1, 0, 0, 0)).build());
+        // a rebalance copy arriving after a newer live write must lose
+        stub.upsert(UpsertRequest.newBuilder().setOnlyIfAbsent(true)
+                .addChunks(chunk("a#0", "p", 0, 1, 0, 0)).addChunks(chunk("b#0", "p", 0, 0, 1, 0)).build());
+        assertEquals("a#0", stub.search(query("p", 1, 1, 0, 0, 0)).getHits(0).getChunkId());
+        assertEquals(1f, stub.search(query("p", 1, 1, 0, 0, 0)).getHits(0).getScore(), 1e-6); // old vector kept
+        assertEquals(2, stub.search(query("p", 1, 1, 0, 0, 0)).getPartitionSize()); // b#0 was absent, so added
+    }
+
+    @Test
+    void scanStreamsAllChunksOrOnlyThoseThatMoveUnderATargetRing() {
+        dev.vectorsearch.common.ring.HashRing three = dev.vectorsearch.common.ring.HashRing.of(List.of("node-1", "node-2", "node-3"));
+        dev.vectorsearch.common.ring.HashRing four = dev.vectorsearch.common.ring.HashRing.of(List.of("node-1", "node-2", "node-3", "node-4"));
+        UpsertRequest.Builder req = UpsertRequest.newBuilder();
+        List<String> ids = new ArrayList<>();
+        for (int i = 0; i < 2000; i++) {
+            String id = i + "#0";
+            if (!three.partitionOf(id).id().equals("node-1.node-2")) continue;
+            ids.add(id);
+            req.addChunks(chunk(id, "node-1.node-2", 1, i, 0, 0));
+        }
+        stub.upsert(req.build());
+
+        List<ChunkVector> all = new ArrayList<>();
+        stub.scan(dev.vectorsearch.proto.v1.ScanRequest.newBuilder().setPartition("node-1.node-2").setBatchSize(50).build())
+                .forEachRemaining(m -> all.addAll(m.getChunksList()));
+        assertEquals(ids.size(), all.size());
+        assertEquals(new java.util.HashSet<>(ids), all.stream().map(ChunkVector::getChunkId).collect(java.util.stream.Collectors.toSet()));
+        assertEquals(DIM, all.get(0).getVectorCount());
+
+        List<ChunkVector> moved = new ArrayList<>();
+        stub.scan(dev.vectorsearch.proto.v1.ScanRequest.newBuilder().setPartition("node-1.node-2").addAllRingNodes(four.nodes()).build())
+                .forEachRemaining(m -> moved.addAll(m.getChunksList()));
+        long expected = ids.stream().filter(id -> !four.partitionOf(id).id().equals("node-1.node-2")).count();
+        assertEquals(expected, moved.size());
+        assertTrue(expected > 0 && expected < ids.size());
+        for (ChunkVector c : moved) assertEquals(four.partitionOf(c.getChunkId()).id(), c.getPartition());
+
+        assertEquals(Status.Code.INVALID_ARGUMENT, assertThrows(StatusRuntimeException.class,
+                () -> stub.scan(dev.vectorsearch.proto.v1.ScanRequest.newBuilder().setPartition("p").addRingNodes("bad.id").build()).hasNext())
+                .getStatus().getCode());
     }
 }

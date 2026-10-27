@@ -18,9 +18,15 @@ import java.util.Map;
  *   <li>{@code live} maps node id -> "host:grpcPort" for nodes whose heartbeat is current.
  * </ul>
  */
-public record ClusterView(long ringVersion, HashRing ring, HashRing pending, Map<String, String> live) {
+public record ClusterView(long ringVersion, HashRing ring, long pendingVersion, HashRing pending, Map<String, String> live) {
     public ClusterView {
         live = Map.copyOf(live);
+        if (pending == null) pendingVersion = -1;
+    }
+
+    /** View without a rebalance in progress. */
+    public ClusterView(long ringVersion, HashRing ring, Map<String, String> live) {
+        this(ringVersion, ring, -1, null, live);
     }
 
     /** False until an operator initialised the ring (ClusterAdmin init). */

@@ -11,13 +11,20 @@ import dev.vectorsearch.proto.v1.ShardSearchResponse;
 import dev.vectorsearch.proto.v1.ShardServiceGrpc;
 import dev.vectorsearch.proto.v1.UpsertRequest;
 import dev.vectorsearch.proto.v1.UpsertResponse;
+import dev.vectorsearch.common.ring.HashRing;
+import dev.vectorsearch.proto.v1.ScanRequest;
+import dev.vectorsearch.proto.v1.ScanResponse;
+import dev.vectorsearch.shardnode.index.ChunkItem;
 import dev.vectorsearch.shardnode.index.Hit;
 import dev.vectorsearch.shardnode.store.PartitionStore;
 import io.grpc.Status;
 import io.grpc.StatusRuntimeException;
+import io.grpc.stub.ServerCallStreamObserver;
 import io.grpc.stub.StreamObserver;
 import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.IntConsumer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -73,7 +80,7 @@ public class ShardGrpcService extends ShardServiceGrpc.ShardServiceImplBase {
                 if (c.getChunkId().isBlank()) throw invalid("blank chunk_id");
                 entries.add(new PartitionStore.Entry(c.getChunkId(), c.getPartition(), toArray(c.getVectorList(), c.getChunkId()), c.getText()));
             }
-            int n = store.upsert(entries);
+            int n = store.upsert(entries, req.getOnlyIfAbsent());
             onUpserted.accept(n);
             return UpsertResponse.newBuilder().setUpserted(n).build();
         });
@@ -94,6 +101,57 @@ public class ShardGrpcService extends ShardServiceGrpc.ShardServiceImplBase {
                 .setNodeId(nodeId)
                 .putAllPartitionSizes(store.sizes())
                 .build());
+    }
+
+    /**
+     * Streams a partition's chunks (all of them, or only those that move under a target ring), honouring gRPC
+     * flow control: we only produce the next message when the transport says the client can take it, so a
+     * large partition is never buffered in memory as a whole.
+     */
+    @Override
+    public void scan(ScanRequest req, StreamObserver<ScanResponse> out) {
+        HashRing target;
+        List<ChunkItem> items;
+        try {
+            checkPartition(req.getPartition());
+            target = req.getRingNodesCount() == 0 ? null
+                    : HashRing.of(req.getRingNodesList(), req.getVnodes() > 0 ? req.getVnodes() : HashRing.DEFAULT_VNODES);
+            items = store.items(req.getPartition());
+        } catch (IllegalArgumentException e) {
+            out.onError(invalid(e.getMessage()));
+            return;
+        } catch (StatusRuntimeException e) {
+            out.onError(e);
+            return;
+        }
+        int batch = req.getBatchSize() > 0 ? Math.min(req.getBatchSize(), 4096) : 256;
+        ServerCallStreamObserver<ScanResponse> call = (ServerCallStreamObserver<ScanResponse>) out;
+        Iterator<ChunkItem> it = items.iterator();
+        AtomicBoolean finished = new AtomicBoolean();
+        call.setOnCancelHandler(() -> finished.set(true));
+        Runnable drain = () -> {
+            synchronized (it) {
+                while (!finished.get() && call.isReady()) {
+                    ScanResponse.Builder msg = ScanResponse.newBuilder();
+                    while (it.hasNext() && msg.getChunksCount() < batch) {
+                        ChunkItem c = it.next();
+                        String partition = target == null ? req.getPartition() : target.partitionOf(c.id()).id();
+                        if (target != null && partition.equals(req.getPartition())) continue; // stays put
+                        ChunkVector.Builder v = ChunkVector.newBuilder().setChunkId(c.id()).setPartition(partition)
+                                .setText(c.text() == null ? "" : c.text());
+                        for (float x : c.vector()) v.addVector(x);
+                        msg.addChunks(v);
+                    }
+                    if (msg.getChunksCount() > 0) call.onNext(msg.build());
+                    if (!it.hasNext()) {
+                        finished.set(true);
+                        call.onCompleted();
+                    }
+                }
+            }
+        };
+        call.setOnReadyHandler(drain);
+        drain.run();
     }
 
     private float[] toArray(List<Float> values, String what) {

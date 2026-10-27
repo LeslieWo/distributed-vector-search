@@ -38,6 +38,54 @@ public final class RingStore implements AutoCloseable {
         return RedisKeys.decodeRing(redis().get(RedisKeys.RING_PENDING));
     }
 
+    /**
+     * Starts a rebalance towards {@code target}: writes {@code vs:ring:pending} = (ring version + 1, target).
+     * Re-running with the same target resumes an interrupted rebalance; a different target is refused.
+     * @return the pending version
+     */
+    public long beginRebalance(List<String> target) {
+        List<String> sorted = new java.util.TreeSet<>(target).stream().toList();
+        HashRing.of(sorted); // validates
+        RedisKeys.RingSpec ring = ring();
+        if (ring == null) throw new IllegalStateException("no ring yet: run init first");
+        RedisKeys.RingSpec pending = pending();
+        if (pending != null) {
+            if (pending.nodes().equals(sorted)) return pending.version(); // resume
+            throw new IllegalStateException("another rebalance is pending: " + pending + " (abort it first)");
+        }
+        if (ring.nodes().equals(sorted)) throw new IllegalStateException("ring is already " + sorted);
+        long version = ring.version() + 1;
+        redis().set(RedisKeys.RING_PENDING, RedisKeys.encodeRing(version, sorted));
+        return version;
+    }
+
+    /** Makes the pending ring the ring, atomically (MULTI/EXEC). */
+    public void commitRebalance() {
+        RedisKeys.RingSpec pending = pending();
+        if (pending == null) throw new IllegalStateException("nothing pending");
+        RedisCommands<String, String> r = redis();
+        r.multi();
+        r.set(RedisKeys.RING, RedisKeys.encodeRing(pending.version(), pending.nodes()));
+        r.del(RedisKeys.RING_PENDING);
+        if (r.exec().wasDiscarded()) throw new IllegalStateException("ring commit discarded");
+    }
+
+    /** Drops the pending ring. The current ring was never changed, so readers are unaffected. */
+    public void abortRebalance() {
+        redis().del(RedisKeys.RING_PENDING);
+    }
+
+    /** id -> state of every live writer or reader ({@link ViewAcker#WRITER} / {@link ViewAcker#READER}). */
+    public Map<String, String> views(String role) {
+        Map<String, String> out = new TreeMap<>();
+        String prefix = RedisKeys.VIEW_PREFIX + role + ":";
+        for (String k : redis().keys(prefix + "*")) {
+            String v = redis().get(k);
+            if (v != null) out.put(k.substring(prefix.length()), v);
+        }
+        return out;
+    }
+
     /** node -> address of every node with a current heartbeat. */
     public Map<String, String> liveNodes() {
         Map<String, String> out = new TreeMap<>();

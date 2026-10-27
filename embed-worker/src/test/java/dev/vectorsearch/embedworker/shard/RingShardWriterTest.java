@@ -45,7 +45,7 @@ class RingShardWriterTest {
     ClusterView view(HashRing ring, HashRing pending, Set<String> live) {
         Map<String, String> addr = new LinkedHashMap<>();
         for (String n : live) addr.put(n, shards.get(n).target());
-        return new ClusterView(1, ring, pending, addr);
+        return new ClusterView(1, ring, pending == null ? -1 : 2, pending, addr);
     }
 
     static List<EmbeddedChunk> chunks(int n) {

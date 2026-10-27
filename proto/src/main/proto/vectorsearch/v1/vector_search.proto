@@ -16,6 +16,9 @@ service ShardService {
   rpc Upsert(UpsertRequest) returns (UpsertResponse);
   rpc Delete(DeleteRequest) returns (DeleteResponse);
   rpc Health(HealthRequest) returns (HealthResponse);
+  // Rebalancing / repair (step 27): stream the chunks of one partition. The one server-streaming RPC:
+  // a scan can be hundreds of thousands of chunks and is never on the query path (no hedging, no deadline budget).
+  rpc Scan(ScanRequest) returns (stream ScanResponse);
 }
 
 message ShardSearchRequest {
@@ -50,6 +53,9 @@ message ChunkVector {
 
 message UpsertRequest {
   repeated ChunkVector chunks = 1;
+  // Skip chunks whose id already exists in the target partition. Used when copying data during a rebalance:
+  // if a live write already put a newer version there, the copied (possibly older) one must not overwrite it.
+  bool only_if_absent = 2;
 }
 
 message UpsertResponse {
@@ -78,6 +84,21 @@ message HealthResponse {
   string node_id = 2;
   // partition -> number of vectors stored for it
   map<string, int64> partition_sizes = 3;
+}
+
+message ScanRequest {
+  string partition = 1;
+  // Target ring. If set, only chunks whose partition under this ring differs from `partition` are returned
+  // (= the chunks a rebalance must move), each with ChunkVector.partition set to its new partition.
+  // If empty, every chunk is returned with its current partition (repair: re-copy a whole partition).
+  repeated string ring_nodes = 2;
+  int32 vnodes = 3;
+  // Chunks per streamed message; 0 = server default.
+  int32 batch_size = 4;
+}
+
+message ScanResponse {
+  repeated ChunkVector chunks = 1;
 }
 
 // ---------- Coordinator: the public query API ----------

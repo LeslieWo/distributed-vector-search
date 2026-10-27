@@ -116,4 +116,17 @@ class PersistentPartitionStoreTest {
         s.close();
         assertEquals(Map.of("pa", 2L, "pb", 1L), new PersistentPartitionStore(props()).sizes());
     }
+
+    @Test
+    void onlyIfAbsentIsLoggedAndReplayedWithTheSameOutcome() throws Exception {
+        PersistentPartitionStore s = new PersistentPartitionStore(props());
+        s.upsert(List.of(e("a#0", "p", 1, 0, 0)));
+        s.upsert(List.of(e("a#0", "p", 0, 1, 0), e("b#0", "p", 0, 0, 1)), true);
+        // kill -9: recover from the WAL only
+        PersistentPartitionStore recovered = new PersistentPartitionStore(props());
+        assertEquals(Map.of("p", 2L), recovered.sizes());
+        assertEquals("a#0", recovered.search("p", new float[] {1, 0, 0}, 1, 0).get(0).id());
+        assertEquals(1f, recovered.search("p", new float[] {1, 0, 0}, 1, 0).get(0).score(), 1e-6);
+        recovered.close();
+    }
 }

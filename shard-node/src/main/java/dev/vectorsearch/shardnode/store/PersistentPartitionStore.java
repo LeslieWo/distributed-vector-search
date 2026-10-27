@@ -102,13 +102,14 @@ public class PersistentPartitionStore extends PartitionStore implements AutoClos
             if (type == WriteAheadLog.UPSERT) {
                 // Same parallel batch path as a live Upsert (records stay in order, a batch is parallel).
                 List<Entry> entries = new ArrayList<>();
-                for (ChunkVector c : UpsertRequest.parseFrom(payload).getChunksList()) {
+                UpsertRequest logged = UpsertRequest.parseFrom(payload);
+                for (ChunkVector c : logged.getChunksList()) {
                     float[] v = new float[c.getVectorCount()];
                     for (int i = 0; i < v.length; i++) v[i] = c.getVector(i);
                     entries.add(new Entry(c.getChunkId(), c.getPartition(), v, c.getText()));
                 }
                 entries.forEach(e -> dirty.add(e.partition()));
-                super.upsert(entries);
+                super.upsert(entries, logged.getOnlyIfAbsent()); // replay in log order reproduces the same outcome
             } else if (type == WriteAheadLog.DELETE) {
                 DeleteRequest d = DeleteRequest.parseFrom(payload);
                 dirty.add(d.getPartition());
@@ -120,8 +121,8 @@ public class PersistentPartitionStore extends PartitionStore implements AutoClos
     }
 
     @Override
-    public int upsert(List<Entry> entries) {
-        UpsertRequest.Builder rec = UpsertRequest.newBuilder();
+    public int upsert(List<Entry> entries, boolean onlyIfAbsent) {
+        UpsertRequest.Builder rec = UpsertRequest.newBuilder().setOnlyIfAbsent(onlyIfAbsent);
         for (Entry e : entries) {
             ChunkVector.Builder c = ChunkVector.newBuilder().setChunkId(e.chunkId()).setPartition(e.partition()).setText(e.text() == null ? "" : e.text());
             for (float x : e.vector()) c.addVector(x);
@@ -132,7 +133,7 @@ public class PersistentPartitionStore extends PartitionStore implements AutoClos
             wal.append(WriteAheadLog.UPSERT, rec.build().toByteArray()); // durable before applied/acked
             writesSinceSnapshot.incrementAndGet();
             entries.forEach(e -> dirty.add(e.partition()));
-            return super.upsert(entries);
+            return super.upsert(entries, onlyIfAbsent);
         } catch (IOException e) {
             throw new UncheckedIOException("WAL append failed", e);
         } finally {

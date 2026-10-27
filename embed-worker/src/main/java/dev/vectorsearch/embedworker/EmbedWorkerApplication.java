@@ -3,6 +3,7 @@ package dev.vectorsearch.embedworker;
 import dev.vectorsearch.common.cluster.ChannelPool;
 import dev.vectorsearch.common.cluster.ClusterViewSource;
 import dev.vectorsearch.common.cluster.RedisClusterView;
+import dev.vectorsearch.common.cluster.ViewAcker;
 import dev.vectorsearch.common.cluster.StaticClusterView;
 import dev.vectorsearch.common.kafka.TopicInitializer;
 import dev.vectorsearch.embedding.Embedder;
@@ -16,6 +17,8 @@ import dev.vectorsearch.embedworker.shard.ShardWriter;
 import dev.vectorsearch.embedworker.shard.RingShardWriter;
 import io.grpc.netty.shaded.io.grpc.netty.NettyChannelBuilder;
 import io.micrometer.core.instrument.MeterRegistry;
+import java.lang.management.ManagementFactory;
+import java.time.Duration;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
@@ -48,9 +51,21 @@ public class EmbedWorkerApplication {
 
     /** Each chunk goes to both holders of its partition on the consistent-hash ring (step 23). */
     @Bean
-    ShardWriter shardWriter(WorkerProperties props, ClusterViewSource cluster) {
+    RingShardWriter shardWriter(WorkerProperties props, ClusterViewSource cluster) {
         ChannelPool channels = new ChannelPool(addr -> NettyChannelBuilder.forTarget(addr).usePlaintext().maxInboundMessageSize(32 << 20).build());
         return new RingShardWriter(cluster, channels, props.shardDeadline().toMillis());
+    }
+
+    /**
+     * Tells a rebalance which ring versions this worker writes with (step 27). Singletons are all created before
+     * the consumer (a SmartLifecycle) starts, so the worker is visible to the rebalance barrier before its first
+     * write. One key per process: any number of workers can run. Null (no bean) with a static ring.
+     */
+    @Bean
+    ViewAcker viewAcker(WorkerProperties props, RingShardWriter writer) {
+        if (!props.staticNodes().isBlank()) return null;
+        String id = ManagementFactory.getRuntimeMXBean().getName(); // pid@host
+        return new ViewAcker(props.redisUri(), ViewAcker.WRITER, id, writer::ackState, Duration.ofSeconds(1), Duration.ofSeconds(3));
     }
 
     @Bean
