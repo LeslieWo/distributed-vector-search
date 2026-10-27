@@ -1,5 +1,20 @@
 dependencies {
     implementation project(':embedding')
     implementation 'io.grpc:grpc-netty-shaded:1.76.0'
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+    implementation 'org.springframework.boot:spring-boot-starter-actuator'
+    runtimeOnly 'io.micrometer:micrometer-registry-prometheus'
+
     testImplementation 'io.grpc:grpc-inprocess:1.76.0'
+    testImplementation 'org.testcontainers:junit-jupiter'
+    testImplementation 'org.testcontainers:kafka'
+    testImplementation 'org.awaitility:awaitility'
+}
+
+tasks.register('searchCli', JavaExec) {
+    description = 'Embed a query and search a running shard-node: -Pargs="localhost:9101 node-1 5 some query"'
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'dev.vectorsearch.embedworker.it.SearchCli'
+    workingDir = rootDir
+    if (project.hasProperty('args')) args project.property('args').split(' ')
 }

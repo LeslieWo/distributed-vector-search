@@ -52,6 +52,13 @@ public final class MicroBatcher<T> {
         return out;
     }
 
+    /** Removes and returns everything, ignoring maxItems. */
+    public List<T> drainAll() {
+        List<T> out = new ArrayList<>(items);
+        items.clear();
+        return out;
+    }
+
     public int size() {
         return items.size();
     }
