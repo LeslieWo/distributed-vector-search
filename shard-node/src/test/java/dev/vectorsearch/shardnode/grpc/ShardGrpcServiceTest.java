@@ -87,6 +87,20 @@ class ShardGrpcServiceTest {
     }
 
     @Test
+    void sameUpsertBatchThreeTimesChangesNothing() {
+        UpsertRequest batch = UpsertRequest.newBuilder()
+                .addChunks(chunk("a#0", "node-1", 1, 0, 0, 0)).addChunks(chunk("b#0", "node-1", 0, 1, 0, 0))
+                .addChunks(chunk("a#0", "node-1", 1, 0, 0, 0)) // duplicate inside one batch too
+                .build();
+        stub.upsert(batch);
+        ShardSearchResponse first = stub.search(query("node-1", 5, 1, 0, 0, 0));
+        stub.upsert(batch);
+        stub.upsert(batch);
+        assertEquals(Map.of("node-1", 2L), stub.health(HealthRequest.getDefaultInstance()).getPartitionSizesMap());
+        assertEquals(first, stub.search(query("node-1", 5, 1, 0, 0, 0)));
+    }
+
+    @Test
     void deleteRemovesChunks() {
         stub.upsert(UpsertRequest.newBuilder().addChunks(chunk("a#0", "p", 1, 0, 0, 0)).addChunks(chunk("b#0", "p", 0, 1, 0, 0)).build());
         assertEquals(1, stub.delete(DeleteRequest.newBuilder().setPartition("p").addChunkIds("a#0").addChunkIds("zzz").build()).getDeleted());

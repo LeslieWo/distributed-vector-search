@@ -1,7 +1,9 @@
 package dev.vectorsearch.shardnode.metrics;
 
 import dev.vectorsearch.shardnode.store.PersistentPartitionStore;
+import dev.vectorsearch.shardnode.store.PartitionStore;
 import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.FunctionCounter;
 import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.MultiGauge;
@@ -26,6 +28,10 @@ public final class ShardMetrics implements AutoCloseable {
                 .description("vectors stored per partition").baseUnit("vectors").register(registry);
         this.upsertedChunks = Counter.builder("vs.shard.upserted.chunks")
                 .description("chunks applied by Upsert (re-deliveries included)").register(registry);
+        FunctionCounter.builder("vs.shard.upsert.duplicates", store, PartitionStore::duplicateUpserts)
+                .description("upserts skipped because the same chunk with the same vector was already stored").register(registry);
+        FunctionCounter.builder("vs.shard.upsert.replaced", store, PartitionStore::replacedVectors)
+                .description("upserts that replaced a vector (each leaves a soft-deleted HNSW node)").register(registry);
         Gauge.builder("vs.shard.wal.size", store, PersistentPartitionStore::walSizeBytes).baseUnit("bytes").register(registry);
         Timer snapshots = Timer.builder("vs.shard.snapshot").description("time to write all partition snapshots").register(registry);
         store.setSnapshotListener((millis, partitions) -> snapshots.record(Duration.ofMillis(millis)));

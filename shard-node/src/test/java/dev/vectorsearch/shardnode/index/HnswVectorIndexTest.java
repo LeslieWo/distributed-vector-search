@@ -93,6 +93,21 @@ class HnswVectorIndexTest {
     }
 
     @Test
+    void nearIdenticalRedeliveryIsSkippedButRealUpdatesReplace() {
+        HnswVectorIndex hnsw = new HnswVectorIndex(2, HnswVectorIndex.Params.DEFAULT, 16);
+        hnsw.upsert("a", new float[] {0.6f, 0.8f}, "t");
+        hnsw.upsert("a", new float[] {0.6f, 0.8f}, "t");                   // exact duplicate
+        hnsw.upsert("a", new float[] {0.6f + 1e-6f, 0.8f - 1e-6f}, "t");    // same chunk embedded on another CPU
+        assertEquals(2, hnsw.duplicateUpserts());
+        assertEquals(0, hnsw.replacedVectors());
+        hnsw.upsert("a", new float[] {0.6f, 0.8f}, "edited text");         // same vector, new text = update
+        hnsw.upsert("a", new float[] {1f, 0f}, "edited text");             // new vector = update
+        assertEquals(2, hnsw.replacedVectors());
+        assertEquals(1, hnsw.size());
+        assertEquals(1f, hnsw.search(new float[] {1f, 0f}, 1, 0).get(0).score(), 1e-6);
+    }
+
+    @Test
     void saveAndLoadRoundTrip() throws Exception {
         Random r = new Random(1);
         HnswVectorIndex hnsw = new HnswVectorIndex(DIM, HnswVectorIndex.Params.DEFAULT, 16);

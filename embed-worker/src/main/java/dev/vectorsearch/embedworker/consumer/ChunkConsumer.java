@@ -14,6 +14,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -100,14 +101,19 @@ public class ChunkConsumer implements SmartLifecycle, Runnable {
     }
 
     void processAndCommit(List<ConsumerRecord<String, byte[]>> records) {
-        List<Chunk> chunks = new ArrayList<>(records.size());
+        // Same chunk id twice in one batch (re-ingest, redelivery): keep the latest, embed once.
+        // Same key = same partition, and records arrive in offset order, so "last" = newest.
+        Map<String, Chunk> latest = new LinkedHashMap<>();
         for (ConsumerRecord<String, byte[]> r : records) {
             try {
-                chunks.add(RawChunkCodec.toChunk(RawChunkCodec.decode(r.value())));
+                Chunk c = RawChunkCodec.toChunk(RawChunkCodec.decode(r.value()));
+                latest.remove(c.id().value());
+                latest.put(c.id().value(), c);
             } catch (IllegalArgumentException poison) {
                 log.warn("skipping undecodable record {}-{}@{}: {}", r.topic(), r.partition(), r.offset(), poison.getMessage());
             }
         }
+        List<Chunk> chunks = new ArrayList<>(latest.values());
         if (!chunks.isEmpty()) {
             metrics.batchSize.record(chunks.size());
             List<EmbeddedChunk> embedded = metrics.embed.record(() -> embedder.embed(chunks));

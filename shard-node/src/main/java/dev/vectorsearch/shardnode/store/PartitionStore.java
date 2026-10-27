@@ -66,6 +66,14 @@ public class PartitionStore {
         return out;
     }
 
+    public long duplicateUpserts() {
+        return partitions.values().stream().mapToLong(HnswVectorIndex::duplicateUpserts).sum();
+    }
+
+    public long replacedVectors() {
+        return partitions.values().stream().mapToLong(HnswVectorIndex::replacedVectors).sum();
+    }
+
     protected HnswVectorIndex indexFor(String partition) {
         return partitions.computeIfAbsent(partition, p -> newIndex());
     }

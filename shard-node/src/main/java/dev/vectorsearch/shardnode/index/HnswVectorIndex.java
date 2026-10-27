@@ -9,6 +9,8 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 /**
@@ -46,8 +48,24 @@ public final class HnswVectorIndex implements VectorIndex {
         this.defaultEf = defaultEf;
     }
 
+    /** Re-deliveries within this distance count as "the same vector" (BUILDLOG step 18). */
+    static final float DUPLICATE_TOLERANCE = 1e-4f;
+
+    private final AtomicLong duplicates = new AtomicLong();
+    private final AtomicLong replaced = new AtomicLong();
+
     @Override
     public void upsert(String id, float[] vector, String text) {
+        ChunkItem existing = index.get(id).orElse(null);
+        if (existing != null) {
+            if (Objects.equals(existing.text(), text) && nearlyEqual(existing.vector(), vector)) {
+                // Duplicate delivery (at-least-once). Skip: hnswlib would treat a vector that differs in the
+                // last float bit (e.g. embedded on another CPU) as an update and leave a dead node behind.
+                duplicates.incrementAndGet();
+                return;
+            }
+            replaced.incrementAndGet(); // real update: hnswlib soft-deletes the old node and adds a new one
+        }
         ChunkItem item = new ChunkItem(id, vector, text);
         while (true) {
             resizeLock.readLock().lock();
@@ -70,6 +88,22 @@ public final class HnswVectorIndex implements VectorIndex {
         } finally {
             resizeLock.writeLock().unlock();
         }
+    }
+
+    private static boolean nearlyEqual(float[] a, float[] b) {
+        if (a.length != b.length) return false;
+        for (int i = 0; i < a.length; i++) if (Math.abs(a[i] - b[i]) > DUPLICATE_TOLERANCE) return false;
+        return true;
+    }
+
+    /** Upserts skipped as duplicates since this index object was created. */
+    public long duplicateUpserts() {
+        return duplicates.get();
+    }
+
+    /** Upserts that replaced an existing vector (each leaves one soft-deleted node in the graph). */
+    public long replacedVectors() {
+        return replaced.get();
     }
 
     @Override

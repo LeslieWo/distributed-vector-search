@@ -54,7 +54,21 @@ class MiniLmEmbedderTest {
         String longText = "A considerably longer sentence that forces the short one in the same batch to be padded.";
         float[] alone = embedder.embed(shortText);
         float[] inBatch = embedder.embed(List.of(longText, shortText))[1];
+        float maxDiff = 0f;
+        for (int i = 0; i < alone.length; i++) maxDiff = Math.max(maxDiff, Math.abs(alone[i] - inBatch[i]));
+        // Not bit-identical: padding changes the shapes onnxruntime computes with (see BUILDLOG step 18).
+        System.out.printf("alone vs padded-in-batch max abs diff = %.3e, bit-identical = %b%n", maxDiff, java.util.Arrays.equals(alone, inBatch));
         assertArrayEquals(alone, inBatch, 1e-4f);
+
+        // a bigger, mixed batch: 8 texts of different lengths in one onnxruntime call
+        List<String> eight = new java.util.ArrayList<>();
+        for (int i = 0; i < 7; i++) eight.add("filler sentence number " + i + " " + "with more words ".repeat(i * 3));
+        eight.add(shortText);
+        float[] inEight = embedder.embed(eight)[7];
+        float maxDiff8 = 0f;
+        for (int i = 0; i < alone.length; i++) maxDiff8 = Math.max(maxDiff8, Math.abs(alone[i] - inEight[i]));
+        System.out.printf("alone vs batch-of-8 max abs diff = %.3e, bit-identical = %b%n", maxDiff8, java.util.Arrays.equals(alone, inEight));
+        assertArrayEquals(alone, inEight, 1e-4f);
     }
 
     @Test
