@@ -23,9 +23,11 @@ Kafka `localhost:9092`, Redis `localhost:6379`, Prometheus 9090, Grafana 3000.
 ## Data placement: "3 nodes x 2 replicas"
 - Consistent-hash ring over physical node ids, 128 virtual nodes each, hash = Murmur3 64-bit of the key.
 - `chunkId` -> clockwise first vnode = **primary** node P; next vnode clockwise owned by a *different* physical node = **replica** R. Replication factor 2.
-- A shard-node keeps **one HNSW index per partition it stores**, where partition = primary node id. With 3 nodes each node stores 2 partitions (its own + its predecessor's).
-- Query covers every vector exactly once: for each partition P, ask exactly one of {P, R(P)} to search partition P, then merge top-k.
-- Node loss of P: partition P is served by R(P). Hedged request = after the hedge delay, send the same partition query to the other replica and take whichever answers first.
+- A shard-node keeps **one HNSW index per partition it stores**, where partition = the replica pair {P, R} (changed in step 22: with 128 vnodes, keying partitions by primary id scatters that primary's replicas over several nodes, leaving no single "other replica" for hedging/failover). With 3 nodes there are 3 pairs, each node stores 2 of them. Partition count grows as N(N-1)/2.
+- Query covers every vector exactly once: for each partition {P, R}, ask exactly one holder, then merge top-k.
+- Node loss: each partition still has its other holder. Hedged request = after the hedge delay, send the same partition query to the other holder and take whichever answers first.
+- Write ack = ALL (both holders) before the Kafka offset is committed. While a holder is down, indexing stalls (Kafka lag grows) but queries and ingest keep working. Hinted handoff deferred.
+- Snapshots: every 5 min, or early once the WAL passes 64 MB (re-measure at 2M scale).
 
 ## Kafka
 - Topic `raw-chunks`: 12 partitions, key = chunkId (same chunk always lands in the same partition -> ordering per chunk).
