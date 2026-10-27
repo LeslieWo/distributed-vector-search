@@ -17,6 +17,8 @@ public record CoordinatorProperties(
         int maxK,
         int efSearch,
         Duration defaultDeadline,
+        Duration responseReserve,
+        Duration shardTimeout,
         boolean cacheEnabled,
         Duration cacheTtl,
         Duration cacheTimeout) {
@@ -32,6 +34,10 @@ public record CoordinatorProperties(
         if (maxK <= 0) maxK = 100;
         if (efSearch < 0) efSearch = 0; // 0 = each shard's default (80)
         if (defaultDeadline == null) defaultDeadline = Duration.ofSeconds(1);
+        // shards must give up this much before the query deadline, so a partial answer still reaches the client
+        if (responseReserve == null) responseReserve = Duration.ofMillis(5);
+        // upper bound for one partition request even when the query deadline is far away
+        if (shardTimeout == null) shardTimeout = Duration.ofMillis(500);
         if (cacheTtl == null) cacheTtl = Duration.ofSeconds(60);
         if (cacheTimeout == null) cacheTimeout = Duration.ofMillis(50);
     }

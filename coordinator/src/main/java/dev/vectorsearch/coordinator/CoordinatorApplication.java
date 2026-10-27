@@ -62,7 +62,7 @@ public class CoordinatorApplication {
 
     @Bean
     ShardSearcher shardSearcher(CoordinatorProperties props, RedisClusterView cluster, ChannelPool channels) {
-        return new ScatterGather(cluster, channels, new RoundRobinSelector(), props.efSearch());
+        return new ScatterGather(cluster, channels, new RoundRobinSelector(), props.efSearch(), props.responseReserve(), props.shardTimeout());
     }
 
     /**

@@ -14,6 +14,7 @@ import dev.vectorsearch.proto.v1.ShardSearchResponse;
 import dev.vectorsearch.proto.v1.ShardServiceGrpc;
 import io.grpc.Deadline;
 import io.grpc.Status;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -36,20 +37,37 @@ public final class ScatterGather implements ShardSearcher {
     private final ChannelPool channels;
     private final ReplicaSelector selector;
     private final int efSearch;
+    private final long reserveMicros;
+    private final long shardTimeoutMicros;
     private final AtomicReference<ClusterView> lastView = new AtomicReference<>();
 
-    public ScatterGather(ClusterViewSource cluster, ChannelPool channels, ReplicaSelector selector, int efSearch) {
+    /**
+     * @param responseReserve shards are given the query deadline minus this, so that when they time out the
+     *                        coordinator still has time to merge and answer with partial results
+     * @param shardTimeout    cap on one partition request even when the query deadline is far away
+     */
+    public ScatterGather(ClusterViewSource cluster, ChannelPool channels, ReplicaSelector selector, int efSearch,
+                         Duration responseReserve, Duration shardTimeout) {
         this.cluster = cluster;
         this.channels = channels;
         this.selector = selector;
         this.efSearch = efSearch;
+        this.reserveMicros = responseReserve.toNanos() / 1000;
+        this.shardTimeoutMicros = shardTimeout.toNanos() / 1000;
+    }
+
+    /** Deadline for the partition requests: min(query deadline - reserve, now + shard timeout). */
+    Deadline shardDeadline(Deadline queryDeadline) {
+        long budget = Math.min(queryDeadline.timeRemaining(TimeUnit.MICROSECONDS) - reserveMicros, shardTimeoutMicros);
+        return Deadline.after(Math.max(0, budget), TimeUnit.MICROSECONDS);
     }
 
     /** Outcome of one partition: its hits, or why it is missing. */
     record PartitionResult(Partition partition, List<ScoredChunk> hits, String error) {}
 
     @Override
-    public Result search(float[] query, int k, Deadline deadline) {
+    public Result search(float[] query, int k, Deadline queryDeadline) {
+        Deadline deadline = shardDeadline(queryDeadline); // every partition request shares this budget
         ClusterView view = cluster.view();
         if (!view.hasRing()) throw Status.UNAVAILABLE.withDescription("no ring in cluster metadata").asRuntimeException();
         syncChannels(view);

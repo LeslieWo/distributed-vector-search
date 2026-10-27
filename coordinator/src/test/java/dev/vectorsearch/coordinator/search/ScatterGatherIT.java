@@ -27,7 +27,7 @@ class ScatterGatherIT {
     @BeforeEach
     void up() throws Exception {
         c = new ClusterFixture(dir, 3000);
-        sg = new ScatterGather(c.view, c.channels, new RoundRobinSelector(), 200);
+        sg = new ScatterGather(c.view, c.channels, new RoundRobinSelector(), 200, java.time.Duration.ofMillis(5), java.time.Duration.ofMillis(500));
     }
 
     @AfterEach

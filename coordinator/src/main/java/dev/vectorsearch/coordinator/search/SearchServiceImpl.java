@@ -59,6 +59,11 @@ public class SearchServiceImpl extends SearchServiceGrpc.SearchServiceImplBase {
         // The client's deadline if it sent one, otherwise ours (step 32).
         Deadline clientDeadline = Context.current().getDeadline();
         Deadline deadline = clientDeadline != null ? clientDeadline : Deadline.after(props.defaultDeadline().toMillis(), TimeUnit.MILLISECONDS);
+        if (deadline.timeRemaining(TimeUnit.MICROSECONDS) <= props.responseReserve().toNanos() / 1000) {
+            // not even enough time to answer: fail fast instead of doing work nobody will read
+            out.onError(Status.DEADLINE_EXCEEDED.withDescription("deadline too short").asRuntimeException());
+            return;
+        }
 
         if (cache != null) {
             Optional<SearchResponse> hit = cache.get(text, k);

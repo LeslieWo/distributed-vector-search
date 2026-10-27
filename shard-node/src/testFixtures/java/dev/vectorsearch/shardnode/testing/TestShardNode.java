@@ -7,6 +7,8 @@ import dev.vectorsearch.shardnode.ShardNodeProperties;
 import dev.vectorsearch.shardnode.grpc.GrpcServerLifecycle;
 import dev.vectorsearch.shardnode.grpc.ShardGrpcService;
 import dev.vectorsearch.shardnode.store.PersistentPartitionStore;
+import io.grpc.Context;
+import io.grpc.Deadline;
 import io.grpc.Status;
 import io.grpc.stub.StreamObserver;
 import java.nio.file.Path;
@@ -14,6 +16,7 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
@@ -30,6 +33,8 @@ public final class TestShardNode implements AutoCloseable {
     public volatile long searchDelayMillis;
     /** every Search fails with this status (null = serve normally) */
     public volatile Status searchFailure;
+    /** time left until the caller's deadline when the last Search arrived, ms (-1 = no deadline) */
+    public volatile long lastDeadlineMillis = -1;
 
     public TestShardNode(String id, int dim, Path dataDir, String redisUri) {
         this(id, dim, dataDir, redisUri, 0);
@@ -42,6 +47,8 @@ public final class TestShardNode implements AutoCloseable {
             @Override
             public void search(ShardSearchRequest req, StreamObserver<ShardSearchResponse> out) {
                 searchesPerPartition.computeIfAbsent(req.getPartition(), p -> new AtomicInteger()).incrementAndGet();
+                Deadline d = Context.current().getDeadline();
+                lastDeadlineMillis = d == null ? -1 : d.timeRemaining(TimeUnit.MILLISECONDS);
                 if (searchFailure != null) {
                     out.onError(searchFailure.asRuntimeException());
                     return;

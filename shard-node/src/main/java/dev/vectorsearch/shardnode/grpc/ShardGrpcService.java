@@ -17,6 +17,7 @@ import dev.vectorsearch.proto.v1.ScanResponse;
 import dev.vectorsearch.shardnode.index.ChunkItem;
 import dev.vectorsearch.shardnode.index.Hit;
 import dev.vectorsearch.shardnode.store.PartitionStore;
+import io.grpc.Context;
 import io.grpc.Status;
 import io.grpc.StatusRuntimeException;
 import io.grpc.stub.ServerCallStreamObserver;
@@ -38,6 +39,7 @@ public class ShardGrpcService extends ShardServiceGrpc.ShardServiceImplBase {
     private final int dimension;
     private final int maxK;
     private final IntConsumer onUpserted;
+    private volatile Runnable onExpired = () -> {};
 
     public ShardGrpcService(PartitionStore store) {
         this(store, n -> {});
@@ -52,8 +54,22 @@ public class ShardGrpcService extends ShardServiceGrpc.ShardServiceImplBase {
         this.maxK = store.properties().maxK();
     }
 
+    /** Metrics hook: called for each Search skipped because its deadline had passed. */
+    public void setOnExpired(Runnable onExpired) {
+        this.onExpired = onExpired;
+    }
+
     @Override
     public void search(ShardSearchRequest req, StreamObserver<ShardSearchResponse> out) {
+        // Deadline propagation (step 32): the caller's deadline travels with the request. If it already passed
+        // (e.g. the request waited in our thread pool queue while we were overloaded) or the caller cancelled
+        // (a hedge winner elsewhere), nobody will read the answer: skip the HNSW work.
+        Context ctx = Context.current();
+        if (ctx.isCancelled() || (ctx.getDeadline() != null && ctx.getDeadline().isExpired())) {
+            onExpired.run();
+            out.onError(Status.DEADLINE_EXCEEDED.withDescription("deadline passed before the search started").asRuntimeException());
+            return;
+        }
         handle(out, () -> {
             checkPartition(req.getPartition());
             if (req.getK() <= 0 || req.getK() > maxK) throw invalid("k must be in [1, " + maxK + "]");

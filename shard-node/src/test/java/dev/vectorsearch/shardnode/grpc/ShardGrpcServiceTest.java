@@ -169,4 +169,27 @@ class ShardGrpcServiceTest {
                 () -> stub.scan(dev.vectorsearch.proto.v1.ScanRequest.newBuilder().setPartition("p").addRingNodes("bad.id").build()).hasNext())
                 .getStatus().getCode());
     }
+
+    @Test
+    void searchWhoseDeadlineAlreadyPassedIsSkipped() throws Exception {
+        PartitionStore store = new PartitionStore(props(DIM)) {
+            @Override
+            public List<dev.vectorsearch.shardnode.index.Hit> search(String partition, float[] query, int k, int ef) {
+                throw new AssertionError("must not search for a caller that gave up");
+            }
+        };
+        ShardGrpcService svc = new ShardGrpcService(store);
+        java.util.concurrent.atomic.AtomicInteger expired = new java.util.concurrent.atomic.AtomicInteger();
+        svc.setOnExpired(expired::incrementAndGet);
+        java.util.concurrent.atomic.AtomicReference<Throwable> error = new java.util.concurrent.atomic.AtomicReference<>();
+        io.grpc.Context.current().withDeadline(io.grpc.Deadline.after(-1, java.util.concurrent.TimeUnit.MILLISECONDS),
+                java.util.concurrent.Executors.newSingleThreadScheduledExecutor()).run(() -> svc.search(query("p", 1, 1, 0, 0, 0),
+                new io.grpc.stub.StreamObserver<>() {
+                    public void onNext(ShardSearchResponse r) {}
+                    public void onError(Throwable t) { error.set(t); }
+                    public void onCompleted() {}
+                }));
+        assertEquals(Status.Code.DEADLINE_EXCEEDED, Status.fromThrowable(error.get()).getCode());
+        assertEquals(1, expired.get());
+    }
 }

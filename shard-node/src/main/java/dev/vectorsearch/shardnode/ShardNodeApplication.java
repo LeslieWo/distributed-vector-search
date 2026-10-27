@@ -7,6 +7,7 @@ import dev.vectorsearch.shardnode.metrics.GrpcMetricsInterceptor;
 import dev.vectorsearch.shardnode.metrics.ShardMetrics;
 import dev.vectorsearch.shardnode.store.PartitionStore;
 import dev.vectorsearch.shardnode.store.PersistentPartitionStore;
+import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import java.util.List;
 import org.springframework.boot.SpringApplication;
@@ -33,8 +34,12 @@ public class ShardNodeApplication {
     }
 
     @Bean
-    ShardGrpcService shardGrpcService(PartitionStore store, ShardMetrics metrics) {
-        return new ShardGrpcService(store, metrics::recordUpserted);
+    ShardGrpcService shardGrpcService(PartitionStore store, ShardMetrics metrics, MeterRegistry registry) {
+        ShardGrpcService service = new ShardGrpcService(store, metrics::recordUpserted);
+        Counter expired = Counter.builder("vs.shard.search.expired")
+                .description("searches skipped because the caller's deadline had already passed").register(registry);
+        service.setOnExpired(expired::increment);
+        return service;
     }
 
     @Bean
