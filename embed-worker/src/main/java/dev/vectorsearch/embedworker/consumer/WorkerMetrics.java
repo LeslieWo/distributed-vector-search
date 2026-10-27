@@ -12,6 +12,7 @@ public final class WorkerMetrics {
     final Counter retries;
     final Counter dlq;
     final Counter commits;
+    final Counter revocations;
     final Timer embed;
     final Timer write;
     final DistributionSummary batchSize;
@@ -22,6 +23,7 @@ public final class WorkerMetrics {
         retries = Counter.builder("vs.worker.write.retries").description("retriable shard write failures").register(r);
         dlq = Counter.builder("vs.worker.dlq").description("records sent to raw-chunks.dlq").register(r);
         commits = Counter.builder("vs.worker.commits").register(r);
+        revocations = Counter.builder("vs.worker.partitions.revoked").description("rebalances that took partitions away").register(r);
         embed = Timer.builder("vs.worker.embed").publishPercentileHistogram().register(r);
         write = Timer.builder("vs.worker.write").publishPercentileHistogram().register(r);
         batchSize = DistributionSummary.builder("vs.worker.batch.size").register(r);

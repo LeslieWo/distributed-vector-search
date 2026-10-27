@@ -123,20 +123,45 @@ public class ChunkConsumer implements SmartLifecycle, Runnable {
         commit(records);
     }
 
+    /**
+     * Retries retriable failures forever with capped exponential backoff. While waiting, all partitions
+     * are paused and we keep calling poll(): paused partitions return no records, but the poll keeps us
+     * inside max.poll.interval.ms, so an outage does not get this worker kicked out of the group (which
+     * would trigger a rebalance and redeliver everything to someone who would hit the same outage).
+     */
     private void writeWithRetry(List<EmbeddedChunk> embedded) {
         long backoff = props.retryBackoffInitial().toMillis();
-        while (true) {
-            try {
-                metrics.write.record(() -> writer.write(embedded));
-                return;
-            } catch (ShardWriteException e) {
-                if (!e.retriable()) throw e;
-                // shutting down: give up without committing; the batch is redelivered after restart
-                if (!running) throw new IllegalStateException("stopped while shard writes were failing", e);
-                metrics.retries.increment();
-                log.warn("shard write failed, retrying in {} ms: {}", backoff, e.getMessage());
-                sleep(backoff);
-                backoff = Math.min(backoff * 2, props.retryBackoffMax().toMillis());
+        boolean paused = false;
+        try {
+            while (true) {
+                try {
+                    metrics.write.record(() -> writer.write(embedded));
+                    return;
+                } catch (ShardWriteException e) {
+                    if (!e.retriable()) throw e;
+                    // shutting down: give up without committing; the batch is redelivered after restart
+                    if (!running) throw new IllegalStateException("stopped while shard writes were failing", e);
+                    metrics.retries.increment();
+                    log.warn("shard write failed, retrying in {} ms: {}", backoff, e.getMessage());
+                    paused = true;
+                    waitPolling(backoff);
+                    backoff = Math.min(backoff * 2, props.retryBackoffMax().toMillis());
+                }
+            }
+        } finally {
+            if (paused) consumer.resume(consumer.paused());
+        }
+    }
+
+    private void waitPolling(long millis) {
+        long until = System.currentTimeMillis() + millis;
+        long left;
+        while ((left = until - System.currentTimeMillis()) > 0) {
+            // re-pause every time: a rebalance during the wait may have handed us new, unpaused partitions
+            consumer.pause(consumer.assignment());
+            for (ConsumerRecord<String, byte[]> r : consumer.poll(Duration.ofMillis(left))) {
+                batcher.add(r); // only possible right after a rebalance; keep them, nothing is lost
+                metrics.records.increment();
             }
         }
     }
@@ -160,18 +185,11 @@ public class ChunkConsumer implements SmartLifecycle, Runnable {
         }
     }
 
-    private static void sleep(long millis) {
-        try {
-            Thread.sleep(millis);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-        }
-    }
-
     private final class Rebalance implements ConsumerRebalanceListener {
         @Override
         public void onPartitionsRevoked(Collection<TopicPartition> partitions) {
             assigned.removeAll(partitions);
+            if (!partitions.isEmpty()) metrics.revocations.increment();
             // Buffered, uncommitted records of revoked partitions go to the new owner from the committed
             // offset; drop our copies instead of processing them twice.
             List<ConsumerRecord<String, byte[]>> keep = new ArrayList<>();

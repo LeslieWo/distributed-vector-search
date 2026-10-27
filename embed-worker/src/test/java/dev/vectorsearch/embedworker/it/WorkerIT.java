@@ -40,15 +40,16 @@ abstract class WorkerIT {
     }
 
     ConfigurableApplicationContext startWorker(String... extra) {
-        List<String> args = new ArrayList<>(List.of(
-                "--server.port=0",
-                "--worker.bootstrap-servers=" + kafka.getBootstrapServers(),
-                "--worker.embedder=hashing",
-                "--worker.shard-target=" + shard.target(),
-                "--worker.retry-backoff-initial=50ms",
-                "--worker.retry-backoff-max=200ms"));
-        args.addAll(List.of(extra));
-        return new SpringApplicationBuilder(EmbedWorkerApplication.class).run(args.toArray(String[]::new));
+        Map<String, String> args = new java.util.LinkedHashMap<>();
+        args.put("--server.port", "0");
+        args.put("--worker.bootstrap-servers", kafka.getBootstrapServers());
+        args.put("--worker.embedder", "hashing");
+        args.put("--worker.shard-target", shard.target());
+        args.put("--worker.retry-backoff-initial", "50ms");
+        args.put("--worker.retry-backoff-max", "200ms");
+        for (String e : extra) args.put(e.substring(0, e.indexOf('=')), e.substring(e.indexOf('=') + 1)); // extras override
+        return new SpringApplicationBuilder(EmbedWorkerApplication.class)
+                .run(args.entrySet().stream().map(e -> e.getKey() + "=" + e.getValue()).toArray(String[]::new));
     }
 
     /** Produces docs prefix0..prefix(n-1), one chunk each; returns their chunk ids. */
