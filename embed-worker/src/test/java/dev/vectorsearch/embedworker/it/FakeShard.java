@@ -18,6 +18,8 @@ import java.util.function.Predicate;
 /** Real gRPC server on a random port that records upserts per chunk id and can be told to fail. */
 public final class FakeShard implements AutoCloseable {
     public final Map<String, AtomicInteger> upsertsPerChunk = new ConcurrentHashMap<>();
+    /** chunk id -> partitions it was written into */
+    public final Map<String, Set<String>> partitionsOf = new ConcurrentHashMap<>();
     public final AtomicLong totalUpserts = new AtomicLong();
     public final AtomicLong rejectedCalls = new AtomicLong();
     /** while > 0, each call fails with UNAVAILABLE and decrements */
@@ -45,6 +47,7 @@ public final class FakeShard implements AutoCloseable {
                 }
                 for (ChunkVector c : req.getChunksList()) {
                     upsertsPerChunk.computeIfAbsent(c.getChunkId(), k -> new AtomicInteger()).incrementAndGet();
+                    partitionsOf.computeIfAbsent(c.getChunkId(), k -> ConcurrentHashMap.newKeySet()).add(c.getPartition());
                     totalUpserts.incrementAndGet();
                 }
                 out.onNext(UpsertResponse.newBuilder().setUpserted(req.getChunksCount()).build());

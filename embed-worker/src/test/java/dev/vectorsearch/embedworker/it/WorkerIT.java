@@ -44,7 +44,7 @@ abstract class WorkerIT {
         args.put("--server.port", "0");
         args.put("--worker.bootstrap-servers", kafka.getBootstrapServers());
         args.put("--worker.embedder", "hashing");
-        args.put("--worker.shard-target", shard.target());
+        args.put("--worker.static-nodes", "node-1=" + shard.target()); // single-node ring: partition "node-1"
         args.put("--worker.retry-backoff-initial", "50ms");
         args.put("--worker.retry-backoff-max", "200ms");
         for (String e : extra) args.put(e.substring(0, e.indexOf('=')), e.substring(e.indexOf('=') + 1)); // extras override

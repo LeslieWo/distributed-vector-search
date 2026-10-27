@@ -7,8 +7,7 @@ import java.util.List;
  * Where embedded chunks go. Returns only when every chunk is durably acknowledged by every target
  * it must reach; the consumer commits Kafka offsets only after that.
  *
- * <p>Seam for Phase 3: today {@link SingleShardWriter} sends everything to one configured node;
- * steps 21-23 add a consistent-hash implementation that picks primary + replica per chunk id.
+ * <p>{@link RingShardWriter} sends each chunk to both holders of its partition on the consistent-hash ring.
  */
 public interface ShardWriter extends AutoCloseable {
 

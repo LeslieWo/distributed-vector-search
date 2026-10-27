@@ -1,5 +1,7 @@
 package dev.vectorsearch.embedworker;
 
+import dev.vectorsearch.common.cluster.ChannelPool;
+import dev.vectorsearch.common.cluster.StaticClusterView;
 import dev.vectorsearch.common.kafka.TopicInitializer;
 import dev.vectorsearch.embedding.Embedder;
 import dev.vectorsearch.embedding.HashingEmbedder;
@@ -9,7 +11,7 @@ import dev.vectorsearch.embedworker.consumer.DeadLetterPublisher;
 import dev.vectorsearch.embedworker.consumer.WorkerMetrics;
 import dev.vectorsearch.embedworker.pipeline.ChunkEmbedder;
 import dev.vectorsearch.embedworker.shard.ShardWriter;
-import dev.vectorsearch.embedworker.shard.SingleShardWriter;
+import dev.vectorsearch.embedworker.shard.RingShardWriter;
 import io.grpc.netty.shaded.io.grpc.netty.NettyChannelBuilder;
 import io.micrometer.core.instrument.MeterRegistry;
 import org.springframework.boot.SpringApplication;
@@ -34,13 +36,11 @@ public class EmbedWorkerApplication {
         };
     }
 
-    /** Phase 2: one configured shard-node. Steps 21-23 swap in the consistent-hash ring router here. */
+    /** Each chunk goes to both holders of its partition on the consistent-hash ring (step 23). */
     @Bean
     ShardWriter shardWriter(WorkerProperties props) {
-        String[] hp = props.shardTarget().split(":");
-        return new SingleShardWriter(
-                NettyChannelBuilder.forAddress(hp[0], Integer.parseInt(hp[1])).usePlaintext().maxInboundMessageSize(32 << 20).build(),
-                props.shardPartition(), props.shardDeadline().toMillis());
+        ChannelPool channels = new ChannelPool(addr -> NettyChannelBuilder.forTarget(addr).usePlaintext().maxInboundMessageSize(32 << 20).build());
+        return new RingShardWriter(StaticClusterView.parse(props.staticNodes()), channels, props.shardDeadline().toMillis());
     }
 
     @Bean
