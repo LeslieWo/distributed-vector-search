@@ -4,6 +4,10 @@
 # Writes data/run/k6-<label>.json (per-step table) and data/run/k6-<label>.txt (conditions + table + counter deltas).
 cd "$(dirname "$0")/.."
 label=$1; shift
+# timing runs only on AC power and not in low power mode (macOS); ALLOW_BATTERY=1 to override for functional checks
+if [[ -z ${ALLOW_BATTERY:-} ]] && { ! pmset -g batt | grep -q "AC Power" || pmset -g | grep -q "powermode *1"; }; then
+  echo "refusing to run: not on AC power or low power mode is on ($(pmset -g batt | head -1))" >&2; exit 3
+fi
 out=data/run/k6-$label
 # cool down: wait (max 3 min) until the 1-minute load average is under 20 so a run does not start in the tail of
 # the previous one (iCloud alone keeps it around 5-15 on this laptop)
