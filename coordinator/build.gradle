@@ -38,7 +38,7 @@ tasks.register('recallCheck', JavaExec) {
     classpath = sourceSets.test.runtimeClasspath
     mainClass = 'dev.vectorsearch.coordinator.tools.RecallCheck'
     workingDir = rootDir
-    jvmArgs '-Xmx2g'
+    jvmArgs '-Xmx10g'
     if (project.hasProperty('args')) args project.property('args').split(' ')
 }
 
