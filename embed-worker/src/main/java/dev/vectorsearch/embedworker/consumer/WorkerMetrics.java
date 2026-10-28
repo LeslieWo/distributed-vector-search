@@ -16,8 +16,10 @@ public final class WorkerMetrics {
     final Timer embed;
     final Timer write;
     final DistributionSummary batchSize;
+    final MeterRegistry registry; // also gets the Kafka consumer's own metrics (records-lag-max, ...) once it exists
 
     public WorkerMetrics(MeterRegistry r) {
+        registry = r;
         records = Counter.builder("vs.worker.records").description("records taken from raw-chunks").register(r);
         written = Counter.builder("vs.worker.written").description("chunks acknowledged by the shard writer").register(r);
         retries = Counter.builder("vs.worker.write.retries").description("retriable shard write failures").register(r);

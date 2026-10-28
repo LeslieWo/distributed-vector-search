@@ -9,6 +9,7 @@ import dev.vectorsearch.embedworker.pipeline.ChunkEmbedder;
 import dev.vectorsearch.embedworker.pipeline.EmbeddedChunk;
 import dev.vectorsearch.embedworker.shard.ShardWriteException;
 import dev.vectorsearch.embedworker.shard.ShardWriter;
+import io.micrometer.core.instrument.binder.kafka.KafkaClientMetrics;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -74,6 +75,8 @@ public class ChunkConsumer implements SmartLifecycle, Runnable {
     @Override
     public void start() {
         consumer = new KafkaConsumer<>(consumerConfig(props), new StringDeserializer(), new ByteArrayDeserializer());
+        // consumer lag etc. for the Grafana dashboard (step 48); no broker-side exporter needed
+        new KafkaClientMetrics(consumer).bindTo(metrics.registry);
         running = true;
         thread = Thread.ofPlatform().name("chunk-consumer").start(this);
     }

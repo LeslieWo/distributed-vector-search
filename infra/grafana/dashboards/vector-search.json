@@ -1,0 +1,186 @@
+{
+  "uid": "vector-search",
+  "title": "Vector Search",
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "5s",
+  "time": { "from": "now-15m", "to": "now" },
+  "templating": { "list": [] },
+  "panels": [
+    {
+      "type": "row", "title": "Queries (coordinator)", "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 }, "id": 1, "panels": []
+    },
+    {
+      "type": "timeseries", "title": "Query QPS (by cache result)", "id": 2,
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 1 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "expr": "sum by (cache) (rate(vs_coord_search_seconds_count[$__rate_interval]))", "legendFormat": "cache={{cache}}" },
+        { "refId": "B", "expr": "sum(rate(vs_coord_search_seconds_count[$__rate_interval]))", "legendFormat": "total" }
+      ]
+    },
+    {
+      "type": "timeseries", "title": "Query latency inside coordinator (p50 / p95 / p99)", "id": 3,
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 1 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "expr": "histogram_quantile(0.50, sum by (le) (rate(vs_coord_search_seconds_bucket[$__rate_interval])))", "legendFormat": "p50" },
+        { "refId": "B", "expr": "histogram_quantile(0.95, sum by (le) (rate(vs_coord_search_seconds_bucket[$__rate_interval])))", "legendFormat": "p95" },
+        { "refId": "C", "expr": "histogram_quantile(0.99, sum by (le) (rate(vs_coord_search_seconds_bucket[$__rate_interval])))", "legendFormat": "p99" }
+      ]
+    },
+    {
+      "type": "timeseries", "title": "Query embedding latency (p50 / p99)", "id": 4,
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 1 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "expr": "histogram_quantile(0.50, sum by (le) (rate(vs_coord_embed_seconds_bucket[$__rate_interval])))", "legendFormat": "p50" },
+        { "refId": "B", "expr": "histogram_quantile(0.99, sum by (le) (rate(vs_coord_embed_seconds_bucket[$__rate_interval])))", "legendFormat": "p99" }
+      ]
+    },
+    {
+      "type": "timeseries", "title": "Hedges sent / won / denied per second", "id": 5,
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 9 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "expr": "sum(rate(vs_coord_hedge_sent_total[$__rate_interval]))", "legendFormat": "sent" },
+        { "refId": "B", "expr": "sum(rate(vs_coord_hedge_won_total[$__rate_interval]))", "legendFormat": "won" },
+        { "refId": "C", "expr": "sum(rate(vs_coord_hedge_denied_total[$__rate_interval]))", "legendFormat": "denied (budget)" }
+      ]
+    },
+    {
+      "type": "stat", "title": "Extra partition requests from hedging (%)", "id": 6,
+      "gridPos": { "h": 8, "w": 4, "x": 8, "y": 9 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "percent", "decimals": 2 }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "expr": "100 * sum(rate(vs_coord_hedge_sent_total[5m])) / sum(rate(vs_coord_partition_requests_total[5m]))" }
+      ]
+    },
+    {
+      "type": "timeseries", "title": "Failover: retries, nodes marked down, partial answers", "id": 7,
+      "gridPos": { "h": 8, "w": 6, "x": 12, "y": 9 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "expr": "sum(increase(vs_coord_retries_total[1m]))", "legendFormat": "retries / min" },
+        { "refId": "B", "expr": "sum(increase(vs_coord_node_marked_down_total[1m]))", "legendFormat": "marked down / min" },
+        { "refId": "C", "expr": "sum(increase(vs_coord_partial_total[1m]))", "legendFormat": "partial / min" }
+      ]
+    },
+    {
+      "type": "stat", "title": "Cache hit rate (5m)", "id": 8,
+      "gridPos": { "h": 8, "w": 6, "x": 18, "y": 9 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "percentunit", "decimals": 1 }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "expr": "sum(rate(vs_coord_cache_hits_total[5m])) / (sum(rate(vs_coord_cache_hits_total[5m])) + sum(rate(vs_coord_cache_misses_total[5m])))" }
+      ]
+    },
+    {
+      "type": "row", "title": "Shard nodes", "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 17 }, "id": 9, "panels": []
+    },
+    {
+      "type": "stat", "title": "Node up (Prometheus scrape)", "id": 10,
+      "gridPos": { "h": 6, "w": 8, "x": 0, "y": 18 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [ { "type": "value", "options": { "0": { "text": "DOWN", "color": "red" }, "1": { "text": "UP", "color": "green" } } } ],
+          "thresholds": { "mode": "absolute", "steps": [ { "color": "red", "value": null }, { "color": "green", "value": 1 } ] }
+        },
+        "overrides": []
+      },
+      "options": { "colorMode": "background", "textMode": "value_and_name" },
+      "targets": [
+        { "refId": "A", "expr": "up{job=\"vector-search\"}", "legendFormat": "{{instance}}" }
+      ]
+    },
+    {
+      "type": "timeseries", "title": "Shard Search QPS per node", "id": 11,
+      "gridPos": { "h": 6, "w": 8, "x": 8, "y": 18 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "expr": "sum by (node) (rate(vs_shard_rpc_seconds_count{method=\"Search\"}[$__rate_interval]))", "legendFormat": "{{node}}" }
+      ]
+    },
+    {
+      "type": "timeseries", "title": "Shard Search latency p99 per node (server side)", "id": 12,
+      "gridPos": { "h": 6, "w": 8, "x": 16, "y": 18 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "expr": "histogram_quantile(0.99, sum by (node, le) (rate(vs_shard_rpc_seconds_bucket{method=\"Search\"}[$__rate_interval])))", "legendFormat": "{{node}}" }
+      ]
+    },
+    {
+      "type": "timeseries", "title": "Vectors per partition per node", "id": 13,
+      "gridPos": { "h": 6, "w": 8, "x": 0, "y": 24 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "expr": "vs_shard_index_size_vectors", "legendFormat": "{{node}} {{partition}}" }
+      ]
+    },
+    {
+      "type": "timeseries", "title": "WAL size per node", "id": 14,
+      "gridPos": { "h": 6, "w": 8, "x": 8, "y": 24 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "bytes" }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "expr": "vs_shard_wal_size_bytes", "legendFormat": "{{node}}" }
+      ]
+    },
+    {
+      "type": "timeseries", "title": "Snapshot duration (avg over 5m)", "id": 15,
+      "gridPos": { "h": 6, "w": 8, "x": 16, "y": 24 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "expr": "rate(vs_shard_snapshot_seconds_sum[5m]) / rate(vs_shard_snapshot_seconds_count[5m])", "legendFormat": "{{node}}" }
+      ]
+    },
+    {
+      "type": "row", "title": "Ingestion", "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 30 }, "id": 16, "panels": []
+    },
+    {
+      "type": "timeseries", "title": "Chunks indexed per second (embed-workers)", "id": 17,
+      "gridPos": { "h": 7, "w": 8, "x": 0, "y": 31 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "expr": "sum(rate(vs_worker_written_total[$__rate_interval]))", "legendFormat": "all workers" },
+        { "refId": "B", "expr": "sum by (instance) (rate(vs_worker_written_total[$__rate_interval]))", "legendFormat": "{{instance}}" }
+      ]
+    },
+    {
+      "type": "timeseries", "title": "Kafka consumer lag (raw-chunks, group embed-worker)", "id": 18,
+      "description": "From the consumer's own records-lag-max metric (kafka-clients via Micrometer). No broker-side exporter is deployed.",
+      "gridPos": { "h": 7, "w": 8, "x": 8, "y": 31 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "expr": "sum by (instance) (kafka_consumer_fetch_manager_records_lag_max)", "legendFormat": "{{instance}} max partition lag" }
+      ]
+    },
+    {
+      "type": "timeseries", "title": "Embed batch latency p99 / shard write p99", "id": 19,
+      "gridPos": { "h": 7, "w": 8, "x": 16, "y": 31 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "expr": "histogram_quantile(0.99, sum by (le) (rate(vs_worker_embed_seconds_bucket[$__rate_interval])))", "legendFormat": "embed p99" },
+        { "refId": "B", "expr": "histogram_quantile(0.99, sum by (le) (rate(vs_worker_write_seconds_bucket[$__rate_interval])))", "legendFormat": "write p99" }
+      ]
+    }
+  ]
+}
