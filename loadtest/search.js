@@ -37,7 +37,9 @@ STEPS.forEach((rate, i) => {
     timeUnit: '1s',
     duration: `${STEP_SECONDS}s`,
     startTime: `${i * (STEP_SECONDS + 3)}s`,
-    preAllocatedVUs: Math.min(MAX_VUS, Math.ceil(rate / 10) + 20),
+    // VUs started mid-run are created lazily and k6 counts iterations as dropped while it does that, so start
+    // enough up front to cover ~250 ms of latency at this rate (step 39: rate/10 produced spurious drops).
+    preAllocatedVUs: Math.min(MAX_VUS, Math.max(50, Math.ceil(rate / 4))),
     maxVUs: MAX_VUS,
     gracefulStop: '2s',
   };

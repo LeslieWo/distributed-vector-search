@@ -5,6 +5,9 @@
 cd "$(dirname "$0")/.."
 label=$1; shift
 out=data/run/k6-$label
+# cool down: wait (max 3 min) until the 1-minute load average is under 20 so a run does not start in the tail of
+# the previous one (iCloud alone keeps it around 5-15 on this laptop)
+for _ in $(seq 1 36); do (( $(sysctl -n vm.loadavg | awk '{printf "%d", $2}') < 20 )) && break; sleep 5; done
 counters() {
   curl -s localhost:8090/actuator/prometheus | awk '
     /^vs_coord_cache_(hits|misses)_total/ || /^vs_coord_hedge_(sent|won|denied)_total/ ||
