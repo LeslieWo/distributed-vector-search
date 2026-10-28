@@ -21,7 +21,8 @@ public record WorkerProperties(
         Duration shardDeadline,
         Duration retryBackoffInitial,
         Duration retryBackoffMax,
-        int maxAttempts) {
+        int maxAttempts,
+        int intraOpThreads) {
 
     public WorkerProperties {
         if (bootstrapServers == null || bootstrapServers.isBlank()) bootstrapServers = "localhost:9092";
@@ -40,5 +41,6 @@ public record WorkerProperties(
         if (retryBackoffInitial == null) retryBackoffInitial = Duration.ofMillis(200);
         if (retryBackoffMax == null) retryBackoffMax = Duration.ofSeconds(5);
         if (maxAttempts <= 0) maxAttempts = 3;
+        if (intraOpThreads < 0) intraOpThreads = 0; // 0 = onnxruntime default (one thread per core)
     }
 }

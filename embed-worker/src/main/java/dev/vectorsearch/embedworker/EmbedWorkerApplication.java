@@ -35,7 +35,7 @@ public class EmbedWorkerApplication {
     @Bean
     Embedder embedder(WorkerProperties props) {
         return switch (props.embedder()) {
-            case "onnx" -> new MiniLmEmbedder(props.modelDir());
+            case "onnx" -> new MiniLmEmbedder(props.modelDir(), MiniLmEmbedder.DEFAULT_MAX_TOKENS, MiniLmEmbedder.DEFAULT_MICRO_BATCH, props.intraOpThreads());
             case "hashing" -> new HashingEmbedder(MiniLmEmbedder.DIMENSION);
             default -> throw new IllegalArgumentException("worker.embedder must be onnx or hashing");
         };

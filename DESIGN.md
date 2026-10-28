@@ -27,7 +27,7 @@ Kafka `localhost:9092`, Redis `localhost:6379`, Prometheus 9090, Grafana 3000.
 - Query covers every vector exactly once: for each partition {P, R}, ask exactly one holder, then merge top-k.
 - Node loss: each partition still has its other holder. Hedged request = after the hedge delay, send the same partition query to the other holder and take whichever answers first.
 - Write ack = ALL (both holders) before the Kafka offset is committed. While a holder is down, indexing stalls (Kafka lag grows) but queries and ingest keep working. Hinted handoff deferred.
-- Snapshots: every 5 min, or early once the WAL passes 64 MB (re-measure at 2M scale).
+- Snapshots: every 5 min, or early once the WAL passes 256 MB (re-measured in step 37: was 64 MB; WAL replay ~6.7 MB/s, so 256 MB bounds crash replay to ~40 s).
 
 ## Kafka
 - Topic `raw-chunks`: 12 partitions, key = chunkId (same chunk always lands in the same partition -> ordering per chunk).
