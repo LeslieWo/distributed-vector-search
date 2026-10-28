@@ -35,7 +35,10 @@ class HedgingIT {
     }
 
     ScatterGather sg(ReplicaSelector selector, HedgePolicy policy, double budget) {
-        NodeStats stats = new NodeStats();
+        return sg(new NodeStats(), selector, policy, budget);
+    }
+
+    ScatterGather sg(NodeStats stats, ReplicaSelector selector, HedgePolicy policy, double budget) {
         if (selector == null) selector = new PowerOfTwoChoicesSelector(stats);
         return new ScatterGather(c.view, c.channels, selector, stats, new NodeHealth(), 0, Duration.ofMillis(5), Duration.ofMillis(500),
                 policy, policy == null ? null : new HedgeBudget(budget, 10), new SimpleMeterRegistry());
@@ -109,5 +112,27 @@ class HedgingIT {
         assertTrue(r.won > 0);
         assertTrue(r.p99 < 50, "hedge answers long before node-1: " + r.p99);
         assertTrue(searched <= 2, "the slow node did (almost) no wasted HNSW work for calls it lost: " + searched);
+    }
+
+    /**
+     * Step 41: a cancelled loser leaves NodeStats with only the hedge time (a few ms), so p2c keeps choosing a stalled
+     * replica. Letting the loser finish records its real latency.
+     */
+    @Test
+    void keepingTheLoserRecordsItsRealLatency() throws Exception {
+        TestShardNode slow = c.nodes.get("node-1");
+        slow.searchDelayMillis = 100;
+        for (boolean cancel : new boolean[] {true, false}) {
+            NodeStats stats = new NodeStats(60_000, System::nanoTime); // long tau: no decay during the test
+            ScatterGather sg = sg(stats, new RoundRobinSelector(), p -> 2 * MS, 1.0);
+            sg.setCancelHedgeLosers(cancel);
+            run(sg, 6, 5);
+            Thread.sleep(400); // let uncancelled losers answer
+            double ms = stats.latencyNanos("node-1") / 1e6;
+            System.out.printf("cancel losers=%s: node-1 latency estimate %.1f ms, in flight %d%n", cancel, ms, stats.inFlight("node-1"));
+            if (cancel) assertTrue(ms < 50, "cancelled losers are recorded at the hedge time: " + ms);
+            else assertTrue(ms >= 90, "kept losers are recorded at their real latency: " + ms);
+            assertEquals(0, stats.inFlight("node-1"));
+        }
     }
 }

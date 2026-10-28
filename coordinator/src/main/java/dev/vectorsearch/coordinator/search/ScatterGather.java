@@ -49,6 +49,7 @@ public final class ScatterGather implements ShardSearcher {
     private final long shardTimeoutMicros;
     private final HedgePolicy hedgePolicy; // null = hedging off
     private final HedgeBudget hedgeBudget;
+    private volatile boolean cancelHedgeLosers = true;
     private final ScheduledExecutorService timers =
             Executors.newSingleThreadScheduledExecutor(Thread.ofPlatform().name("hedge-timer").daemon().factory());
     private final AtomicReference<ClusterView> lastView = new AtomicReference<>();
@@ -160,7 +161,10 @@ public final class ScatterGather implements ShardSearcher {
             this.view = view;
             this.request = request;
             this.deadline = deadline;
-            result.whenComplete((r, e) -> cancelAll()); // winner found, gave up, or timed out: stop the rest
+            // gave up or timed out: stop every attempt. Winner found: stop the loser only if cancelHedgeLosers (step 41)
+            result.whenComplete((r, e) -> {
+                if (e != null || cancelHedgeLosers) cancelAll();
+            });
         }
 
         /** Live holders not marked down; if every live holder is marked down, try them anyway. */
@@ -269,6 +273,16 @@ public final class ScatterGather implements ShardSearcher {
         private synchronized void cancelAll() {
             for (ListenableFuture<ShardSearchResponse> a : attempts.values()) if (!a.isDone()) a.cancel(true);
         }
+    }
+
+    /**
+     * true (step 34): cancel the slower attempt as soon as one answers, saving the shard the work. false (step 41):
+     * let it finish and ignore its hits, so NodeStats sees its real latency and keeps it counted in flight until it
+     * answers. Cancelling hides a stalled replica from p2c: the loser leaves in-flight at once and is recorded at
+     * the hedge time instead of its true latency.
+     */
+    public void setCancelHedgeLosers(boolean cancel) {
+        this.cancelHedgeLosers = cancel;
     }
 
     /**

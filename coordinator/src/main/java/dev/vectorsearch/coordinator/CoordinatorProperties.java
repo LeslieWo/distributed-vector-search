@@ -27,7 +27,8 @@ public record CoordinatorProperties(
         boolean cacheEnabled,
         Duration cacheTtl,
         Duration cacheTimeout,
-        int intraOpThreads) {
+        int intraOpThreads,
+        Boolean hedgeCancelLosers) {
 
     public CoordinatorProperties {
         if (grpcPort < 0) throw new IllegalArgumentException("coordinator.grpc-port must be >= 0");
@@ -51,5 +52,6 @@ public record CoordinatorProperties(
         if (cacheTtl == null) cacheTtl = Duration.ofSeconds(60);
         if (cacheTimeout == null) cacheTimeout = Duration.ofMillis(50);
         if (intraOpThreads < 0) intraOpThreads = 0; // 0 = onnxruntime default (one thread per core)
+        if (hedgeCancelLosers == null) hedgeCancelLosers = true;
     }
 }

@@ -88,8 +88,10 @@ public class CoordinatorApplication {
                                 NodeStats stats, MeterRegistry registry) {
         HedgePolicy hedge = props.hedging()
                 ? new AdaptiveHedgePolicy(props.hedgeMinDelay().toNanos(), props.hedgeInitialDelay().toNanos()) : null;
-        return new ScatterGather(cluster, channels, selector, stats, new NodeHealth(), props.efSearch(), props.responseReserve(),
+        ScatterGather sg = new ScatterGather(cluster, channels, selector, stats, new NodeHealth(), props.efSearch(), props.responseReserve(),
                 props.shardTimeout(), hedge, new HedgeBudget(props.hedgeBudgetRatio(), 10), registry);
+        sg.setCancelHedgeLosers(props.hedgeCancelLosers());
+        return sg;
     }
 
     /**

@@ -55,7 +55,7 @@ class PartialResultsIT {
         ScatterGather sg = new ScatterGather(c.view, c.channels, new PowerOfTwoChoicesSelector(stats), stats, new NodeHealth(), 0,
                 Duration.ofMillis(5), Duration.ofMillis(500), null, null, new SimpleMeterRegistry());
         CoordinatorProperties props = new CoordinatorProperties(0, 4, null, null, "hashing", null, 10, 100, 0, null, null, null, null,
-                false, null, null, 0, false, null, null, 0);
+                false, null, null, 0, false, null, null, 0, null);
         String name = InProcessServerBuilder.generateName();
         server = InProcessServerBuilder.forName(name).addService(new SearchServiceImpl(props, embedder, sg, null, new SimpleMeterRegistry())).build().start();
         channel = InProcessChannelBuilder.forName(name).build();
