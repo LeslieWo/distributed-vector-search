@@ -1,6 +1,7 @@
 plugins {
     id 'org.springframework.boot' version '3.5.6' apply false
     id 'io.spring.dependency-management' version '1.1.7' apply false
+    id 'com.google.cloud.tools.jib' version '3.4.5' apply false
 }
 
 def libraryModules = ['proto', 'common', 'embedding']
@@ -41,6 +42,26 @@ subprojects {
         apply plugin: 'io.spring.dependency-management'
         // Boot 3.5.6 pins Testcontainers 1.21.3 (docker-java API 1.32); Docker 29 under colima needs >= 1.40.
         ext['testcontainers.version'] = '1.21.4'
+        // Container images (step 45): ./gradlew jibDockerBuild -> vector-search/<module>:0.1.0 in the local Docker daemon.
+        // Data (models, snapshots) is mounted by docker-compose, not baked into the image.
+        apply plugin: 'com.google.cloud.tools.jib'
+        jib {
+            from { image = 'eclipse-temurin:21-jre' }
+            to { image = "vector-search/${project.name}:${project.version}" }
+            container {
+                workingDirectory = '/app'
+                mainClass = [
+                    'shard-node'  : 'dev.vectorsearch.shardnode.ShardNodeApplication',
+                    'coordinator' : 'dev.vectorsearch.coordinator.CoordinatorApplication',
+                    'ingest'      : 'dev.vectorsearch.ingest.IngestApplication',
+                    'embed-worker': 'dev.vectorsearch.embedworker.EmbedWorkerApplication'][project.name]
+                creationTime = 'USE_CURRENT_TIMESTAMP'
+            }
+            def colimaSocket = file("${System.getProperty('user.home')}/.colima/default/docker.sock")
+            if (!System.getenv('DOCKER_HOST') && colimaSocket.exists()) {
+                dockerClient { environment = [DOCKER_HOST: "unix://${colimaSocket}".toString()] }
+            }
+        }
         dependencies {
             implementation project(':common')
             implementation project(':proto')

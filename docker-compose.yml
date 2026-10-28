@@ -1,4 +1,4 @@
-# Local dev infra. App services run on the host via ./gradlew bootRun for now.
+# Local dev infra (default) + the app services from the Jib images (profile "app", step 45).
 services:
   kafka:
     image: apache/kafka:3.9.1
@@ -58,3 +58,75 @@ services:
       GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
     depends_on:
       - prometheus
+
+  # ---- App services from the Jib images (step 45): ./gradlew jibDockerBuild && docker compose --profile app up -d
+  # Same ports as the host-run jars, so stop those first (scripts/cluster.sh stop). Small heaps: they share the
+  # colima VM (6 GiB) with Kafka; the 1M-chunk benchmark index runs on the host (-Xmx8g per shard), not here.
+  shard-node-1: &shard
+    image: vector-search/shard-node:0.1.0
+    profiles: ["app"]
+    container_name: vs-shard-node-1
+    environment:
+      JAVA_TOOL_OPTIONS: "-Xmx512m"
+    command: ["--shard.node-id=node-1", "--shard.grpc-port=9101", "--server.port=8081",
+              "--shard.advertise-host=shard-node-1", "--shard.redis-uri=redis://redis:6379", "--shard.data-dir=/data"]
+    volumes: ["shard-1:/data"]
+    ports: ["9101:9101", "8081:8081"]
+    depends_on: { redis: { condition: service_healthy } }
+
+  shard-node-2:
+    <<: *shard
+    container_name: vs-shard-node-2
+    command: ["--shard.node-id=node-2", "--shard.grpc-port=9102", "--server.port=8082",
+              "--shard.advertise-host=shard-node-2", "--shard.redis-uri=redis://redis:6379", "--shard.data-dir=/data"]
+    volumes: ["shard-2:/data"]
+    ports: ["9102:9102", "8082:8082"]
+
+  shard-node-3:
+    <<: *shard
+    container_name: vs-shard-node-3
+    command: ["--shard.node-id=node-3", "--shard.grpc-port=9103", "--server.port=8083",
+              "--shard.advertise-host=shard-node-3", "--shard.redis-uri=redis://redis:6379", "--shard.data-dir=/data"]
+    volumes: ["shard-3:/data"]
+    ports: ["9103:9103", "8083:8083"]
+
+  coordinator:
+    image: vector-search/coordinator:0.1.0
+    profiles: ["app"]
+    container_name: vs-coordinator
+    environment:
+      JAVA_TOOL_OPTIONS: "-Xmx768m"
+    command: ["--coordinator.redis-uri=redis://redis:6379", "--coordinator.model-dir=/app/data/models/all-MiniLM-L6-v2"]
+    volumes: ["./data/models:/app/data/models:ro"]
+    ports: ["9100:9100", "8090:8090"]
+    depends_on: { redis: { condition: service_healthy } }
+
+  ingest:
+    image: vector-search/ingest:0.1.0
+    profiles: ["app"]
+    container_name: vs-ingest
+    environment:
+      JAVA_TOOL_OPTIONS: "-Xmx256m"
+    command: ["--ingest.bootstrap-servers=kafka:29092"]
+    ports: ["8070:8070"]
+    depends_on: { kafka: { condition: service_healthy } }
+
+  embed-worker:
+    image: vector-search/embed-worker:0.1.0
+    profiles: ["app"]
+    container_name: vs-embed-worker
+    environment:
+      JAVA_TOOL_OPTIONS: "-Xmx768m"
+      WORKER_GROUP_ID: ${WORKER_GROUP_ID:-embed-worker}
+    command: ["--worker.bootstrap-servers=kafka:29092", "--worker.redis-uri=redis://redis:6379",
+              "--worker.model-dir=/app/data/models/all-MiniLM-L6-v2", "--worker.intra-op-threads=2"]
+    volumes: ["./data/models:/app/data/models:ro"]
+    ports: ["8075:8075"]
+    depends_on:
+      kafka: { condition: service_healthy }
+      redis: { condition: service_healthy }
+
+volumes:
+  shard-1:
+  shard-2:
+  shard-3:
