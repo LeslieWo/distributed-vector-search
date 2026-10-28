@@ -5,6 +5,7 @@ import dev.vectorsearch.proto.v1.ChunkVector;
 import dev.vectorsearch.proto.v1.DeleteRequest;
 import dev.vectorsearch.proto.v1.UpsertRequest;
 import dev.vectorsearch.shardnode.ShardNodeProperties;
+import dev.vectorsearch.shardnode.index.ChunkItem;
 import dev.vectorsearch.shardnode.index.HnswVectorIndex;
 import java.io.BufferedInputStream;
 import java.io.BufferedOutputStream;
@@ -57,6 +58,7 @@ public class PersistentPartitionStore extends PartitionStore implements AutoClos
     private final Set<String> dirty = ConcurrentHashMap.newKeySet(); // partitions with writes not in a snapshot
     private final AtomicBoolean walSnapshotQueued = new AtomicBoolean();
     private final ScheduledExecutorService scheduler;
+    private final ChunkItem.DiskFormat diskFormat;
     private volatile SnapshotListener listener = (millis, partitions) -> {};
 
     public interface SnapshotListener {
@@ -66,6 +68,7 @@ public class PersistentPartitionStore extends PartitionStore implements AutoClos
     public PersistentPartitionStore(ShardNodeProperties props) {
         super(props);
         this.dir = props.dataDir();
+        this.diskFormat = ChunkItem.DiskFormat.valueOf(props.snapshotFormat().toUpperCase(java.util.Locale.ROOT));
         try {
             Files.createDirectories(dir);
             restore();
@@ -189,7 +192,7 @@ public class PersistentPartitionStore extends PartitionStore implements AutoClos
                 Path target = dir.resolve(e.getKey() + SNAPSHOT_SUFFIX);
                 Path tmp = dir.resolve(e.getKey() + SNAPSHOT_SUFFIX + ".tmp");
                 try (OutputStream out = new BufferedOutputStream(Files.newOutputStream(tmp), 1 << 20)) {
-                    e.getValue().save(out);
+                    e.getValue().save(out, diskFormat);
                 }
                 try (FileChannel ch = FileChannel.open(tmp, StandardOpenOption.WRITE)) {
                     ch.force(true);

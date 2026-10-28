@@ -50,6 +50,11 @@ public final class HnswVectorIndex implements VectorIndex {
 
     /** Re-deliveries within this distance count as "the same vector" (BUILDLOG step 18). */
     static final float DUPLICATE_TOLERANCE = 1e-4f;
+    /**
+     * Plus this fraction of the stored component: a vector restored from an fp16 snapshot differs from the fp32
+     * re-delivery by up to 2^-11 of each component (BUILDLOG step 37). Real updates differ by far more.
+     */
+    static final float DUPLICATE_RELATIVE_TOLERANCE = 1e-3f;
 
     private final AtomicLong duplicates = new AtomicLong();
     private final AtomicLong replaced = new AtomicLong();
@@ -116,7 +121,7 @@ public final class HnswVectorIndex implements VectorIndex {
 
     private static boolean nearlyEqual(float[] a, float[] b) {
         if (a.length != b.length) return false;
-        for (int i = 0; i < a.length; i++) if (Math.abs(a[i] - b[i]) > DUPLICATE_TOLERANCE) return false;
+        for (int i = 0; i < a.length; i++) if (Math.abs(a[i] - b[i]) > DUPLICATE_TOLERANCE + DUPLICATE_RELATIVE_TOLERANCE * Math.abs(a[i])) return false;
         return true;
     }
 
@@ -192,10 +197,17 @@ public final class HnswVectorIndex implements VectorIndex {
      * writes (upsert/delete) for a consistent copy; the shard node's snapshotter does that.
      */
     public void save(OutputStream out) throws IOException {
+        save(out, ChunkItem.DiskFormat.JAVA);
+    }
+
+    /** @param format how each item is written (step 37: fp16 vectors on disk, fp32 in memory) */
+    public void save(OutputStream out, ChunkItem.DiskFormat format) throws IOException {
         resizeLock.readLock().lock();
+        ChunkItem.SAVING.set(format);
         try {
             index.save(out);
         } finally {
+            ChunkItem.SAVING.remove();
             resizeLock.readLock().unlock();
         }
     }

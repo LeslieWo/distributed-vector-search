@@ -19,6 +19,7 @@ public record ShardNodeProperties(
         Path dataDir,
         Duration snapshotInterval,
         long snapshotWalBytes,
+        String snapshotFormat,
         String redisUri,
         String advertiseHost,
         Duration heartbeatInterval,
@@ -39,6 +40,8 @@ public record ShardNodeProperties(
         if (snapshotInterval == null) snapshotInterval = Duration.ofMinutes(5);
         // Snapshot early once the WAL passes this size, bounding replay time after a crash (BUILDLOG steps 22, 37).
         if (snapshotWalBytes <= 0) snapshotWalBytes = 256L << 20;
+        // java = Java-serialized records (pre step 37), fp32 / fp16 = compact items (ChunkItem.DiskFormat)
+        if (snapshotFormat == null || snapshotFormat.isBlank()) snapshotFormat = "java";
         // Membership (step 24): blank redisUri = no heartbeat (unit tests, standalone runs).
         if (redisUri == null) redisUri = "";
         if (advertiseHost == null || advertiseHost.isBlank()) advertiseHost = "localhost";
@@ -50,6 +53,6 @@ public record ShardNodeProperties(
     /** Settings for tests: no heartbeat, given data dir and snapshot policy. */
     public static ShardNodeProperties forTest(String nodeId, int dim, Path dataDir, Duration snapshotInterval, long snapshotWalBytes) {
         return new ShardNodeProperties(nodeId, 0, dim, 16, 100, 32, 16, 100, 2, dataDir, snapshotInterval, snapshotWalBytes,
-                "", null, null, null, null);
+                null, "", null, null, null, null);
     }
 }

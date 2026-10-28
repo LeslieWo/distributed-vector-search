@@ -33,3 +33,4 @@ benchTask('embedSubset', 'EmbedSubset', 'Embeds the first N chunks + Q dev queri
 benchTask('groundTruth', 'GroundTruth', 'Exact top-100 per query by brute force, written to data/vectors')
 benchTask('shardClient', 'ShardClient', 'load|query|health against a running shard-node')
 benchTask('hnswSweep', 'HnswSweep', 'recall@10 vs latency over efSearch for several M values')
+benchTask('snapshotFormatCheck', 'SnapshotFormatCheck', 'bytes/vector and recall@10 before/after reload for each snapshot format')
