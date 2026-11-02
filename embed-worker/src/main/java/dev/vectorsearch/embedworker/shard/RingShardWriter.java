@@ -24,7 +24,7 @@ import java.util.concurrent.TimeUnit;
  * Routes each chunk to both holders of its partition on the consistent-hash ring (and, during a rebalance,
  * also to its holders under the pending ring), one Upsert per node, sent in parallel.
  *
- * <p>Write ack policy = ALL (BUILDLOG step 26): {@link #write} returns only when every target node acked.
+ * <p>Write ack policy = ALL (step 26): {@link #write} returns only when every target node acked.
  * Any failure throws, the consumer does not commit the Kafka offset, and the whole batch is retried later.
  * Re-sending to the nodes that already acked is harmless because Upsert is idempotent by chunk id.
  *

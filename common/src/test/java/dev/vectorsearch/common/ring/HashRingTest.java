@@ -41,7 +41,7 @@ class HashRingTest {
         for (String n : THREE) assertEquals(2, ring.partitionsOf(n).size());
     }
 
-    /** 1M keys, 3 nodes x 128 vnodes. Measured: max/min 1.283 for these node names (BUILDLOG step 21). */
+    /** 1M keys, 3 nodes x 128 vnodes. Measured: max/min 1.283 for these node names (step 21). */
     @Test
     void keysSpreadEvenlyWith128Vnodes() {
         HashRing ring = HashRing.of(THREE);

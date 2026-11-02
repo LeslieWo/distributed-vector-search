@@ -8,7 +8,7 @@ import java.util.List;
  * <p>Partition = the replica set {primary, replica} of the ring arcs it covers (unordered, so the arcs
  * where node-1 is primary and node-2 replica and the arcs where node-2 is primary and node-1 replica are
  * one partition "node-1.node-2"). Every partition therefore lives on exactly two nodes with identical
- * contents, which is what replica selection, hedging and failover need. See BUILDLOG step 22.
+ * contents, which is what replica selection, hedging and failover need. See step 22.
  *
  * @param id      holders sorted and joined with '.', e.g. {@code node-1.node-3}; valid as a file name
  * @param holders sorted node ids (one with a single-node ring, otherwise two)

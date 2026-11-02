@@ -4,7 +4,7 @@ import dev.vectorsearch.common.cluster.ClusterView;
 import dev.vectorsearch.common.ring.Partition;
 import java.util.List;
 
-/** Picks which holder of a partition serves a query (both hold the same data, BUILDLOG step 26). */
+/** Picks which holder of a partition serves a query (both hold the same data, step 26). */
 public interface ReplicaSelector {
 
     /** @param candidates live holders of the partition, at least one */

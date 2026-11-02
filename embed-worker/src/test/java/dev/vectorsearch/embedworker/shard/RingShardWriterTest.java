@@ -110,7 +110,7 @@ class RingShardWriterTest {
 
     /**
      * A node that was unreachable for a while and comes back must be usable at once. Without dropping its channel
-     * when the heartbeat vanished, gRPC's reconnect backoff kept failing calls for many seconds (BUILDLOG step 26).
+     * when the heartbeat vanished, gRPC's reconnect backoff kept failing calls for many seconds (step 26).
      */
     @Test
     void aNodeThatComesBackIsWrittenToImmediately() throws Exception {

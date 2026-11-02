@@ -69,4 +69,23 @@ class DeadlineIT {
         }
         assertTrue(sawMissing > 0, "round robin sent some partitions to slow node-1");
     }
+
+    /**
+     * Step 43: a partition request that hits the per-attempt shard timeout (500 ms) while the query still has time
+     * left is retried on the other replica instead of being reported missing. Found in the chaos run: a node that
+     * had just restarted answered its first requests after > 500 ms and the query came back partial.
+     */
+    @Test
+    void anAttemptThatHitsTheShardTimeoutIsRetriedWhileTheQueryHasTime() {
+        c.nodes.get("node-1").searchDelayMillis = 800; // slower than the 500 ms shard timeout
+        Random rnd = new Random(3);
+        for (int i = 0; i < 4; i++) {
+            long t0 = System.nanoTime();
+            ShardSearcher.Result r = sg.search(ClusterFixture.unit(rnd), 10, Deadline.after(1, TimeUnit.SECONDS));
+            long ms = (System.nanoTime() - t0) / 1_000_000;
+            System.out.println("node-1 +800 ms, shard timeout 500 ms, query deadline 1 s: " + ms + " ms, missing " + r.missingPartitions());
+            assertTrue(r.missingPartitions().isEmpty(), "retried on the other holder: " + r.missingPartitions());
+            assertTrue(ms < 1000, "within the query deadline: " + ms);
+        }
+    }
 }

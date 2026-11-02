@@ -1,4 +1,4 @@
-# Test-session cluster for the vector search service (BUILDLOG step 46, docs/AWS.md).
+# Test-session cluster for the vector search service (docs/AWS.md).
 # NOT APPLIED. Step 47 is pending owner approval; `terraform apply` creates billable resources.
 #
 #   terraform init && terraform plan -var key_name=<ec2 key pair> -var my_ip=<a.b.c.d>/32

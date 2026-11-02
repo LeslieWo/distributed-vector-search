@@ -38,7 +38,7 @@ public record ShardNodeProperties(
         if (grpcThreads <= 0) grpcThreads = Runtime.getRuntime().availableProcessors() * 2;
         if (dataDir == null) dataDir = Path.of("data/snapshots", nodeId);
         if (snapshotInterval == null) snapshotInterval = Duration.ofMinutes(5);
-        // Snapshot early once the WAL passes this size, bounding replay time after a crash (BUILDLOG steps 22, 37).
+        // Snapshot early once the WAL passes this size, bounding replay time after a crash (steps 22, 37).
         if (snapshotWalBytes <= 0) snapshotWalBytes = 256L << 20;
         // java = Java-serialized records (pre step 37), fp32 / fp16 = compact items (ChunkItem.DiskFormat)
         if (snapshotFormat == null || snapshotFormat.isBlank()) snapshotFormat = "java";

@@ -8,7 +8,7 @@ import java.io.ObjectStreamException;
 import java.nio.charset.StandardCharsets;
 
 /**
- * Snapshot-only form of a {@link ChunkItem} (BUILDLOG step 37): id and text as length-prefixed UTF-8, the vector
+ * Snapshot-only form of a {@link ChunkItem} (step 37): id and text as length-prefixed UTF-8, the vector
  * as fp32 or IEEE half precision (fp16). Externalizable, so each item costs its bytes plus a few bytes of stream
  * framing instead of a full Java-serialized record. Reading turns it back into a ChunkItem with an fp32 vector
  * (for fp16: the nearest half-precision value of each component, relative error <= 2^-11).

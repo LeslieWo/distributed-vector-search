@@ -71,7 +71,7 @@ class HedgingIT {
     void hedgingCutsTheTailCausedByRandomHiccups() {
         // every node: 2% of searches stall 40 ms (GC pause, noisy neighbour). Not node-specific: p2c cannot avoid it.
         // (With 5% the p95 itself lands on the stalls, the hedge delay becomes ~40 ms and hedging stops helping:
-        // measured p99 45.8 -> 42.1 ms. See BUILDLOG step 34.)
+        // measured p99 45.8 -> 42.1 ms. See step 34.)
         for (TestShardNode n : c.nodes.values()) n.randomDelayMillis = () -> ThreadLocalRandom.current().nextInt(100) < 2 ? 40 : 0;
         ScatterGather off = sg(null, null, 0);
         run(off, 100, 1); // warm-up

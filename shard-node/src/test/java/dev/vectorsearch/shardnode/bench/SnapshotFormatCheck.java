@@ -11,7 +11,7 @@ import java.util.Map;
 import java.util.stream.IntStream;
 
 /**
- * Snapshot formats on real data (BUILDLOG step 37): {@code ./gradlew -q :shard-node:snapshotFormatCheck}.
+ * Snapshot formats on real data (step 37): {@code ./gradlew -q :shard-node:snapshotFormatCheck}.
  * Builds HNSW (M=16, efC=200) over the 100k embedded MS MARCO passages, saves it in each format, reloads,
  * and compares bytes/vector and recall@10 (ef=80, 1000 dev queries vs exact ground truth) before and after.
  */

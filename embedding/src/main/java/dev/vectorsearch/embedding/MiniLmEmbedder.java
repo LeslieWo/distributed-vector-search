@@ -81,7 +81,7 @@ public final class MiniLmEmbedder implements Embedder {
         Encoding[] enc = tokenizer.batchEncode(texts);
         // Sort by token length and run micro-batches of similar length. A batch is padded to its
         // longest row and attention cost grows with length^2, so mixing a 20-token and a 200-token
-        // text wastes most of the work on padding (measured: micro-batches of 8 after sorting ran ~2x faster than one padded call of 64, BUILDLOG step 13).
+        // text wastes most of the work on padding (measured: micro-batches of 8 after sorting ran ~2x faster than one padded call of 64, step 13).
         Integer[] order = new Integer[enc.length];
         for (int i = 0; i < order.length; i++) order[i] = i;
         Arrays.sort(order, Comparator.comparingInt(i -> enc[i].getIds().length));

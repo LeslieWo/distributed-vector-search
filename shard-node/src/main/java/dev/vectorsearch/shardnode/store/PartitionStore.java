@@ -33,7 +33,7 @@ public class PartitionStore {
 
     /**
      * Inserts a batch in parallel (hnswlib-core supports concurrent adds; one HNSW insert is ~1.4 ms
-     * single-threaded, BUILDLOG step 9). If the batch repeats a chunk id, the last occurrence wins.
+     * single-threaded, step 9). If the batch repeats a chunk id, the last occurrence wins.
      */
     public int upsert(List<Entry> entries) {
         return upsert(entries, false);

@@ -48,11 +48,11 @@ public final class HnswVectorIndex implements VectorIndex {
         this.defaultEf = defaultEf;
     }
 
-    /** Re-deliveries within this distance count as "the same vector" (BUILDLOG step 18). */
+    /** Re-deliveries within this distance count as "the same vector" (step 18). */
     static final float DUPLICATE_TOLERANCE = 1e-4f;
     /**
      * Plus this fraction of the stored component: a vector restored from an fp16 snapshot differs from the fp32
-     * re-delivery by up to 2^-11 of each component (BUILDLOG step 37). Real updates differ by far more.
+     * re-delivery by up to 2^-11 of each component (step 37). Real updates differ by far more.
      */
     static final float DUPLICATE_RELATIVE_TOLERANCE = 1e-3f;
 
@@ -73,7 +73,7 @@ public final class HnswVectorIndex implements VectorIndex {
         upsert(id, vector, text, false);
     }
 
-    /** @param onlyIfAbsent leave an existing item with this id untouched (rebalance copies, BUILDLOG step 27) */
+    /** @param onlyIfAbsent leave an existing item with this id untouched (rebalance copies, step 27) */
     public void upsert(String id, float[] vector, String text, boolean onlyIfAbsent) {
         synchronized (idLocks[(id.hashCode() & 0x7fffffff) % idLocks.length]) {
             upsertLocked(id, vector, text, onlyIfAbsent);

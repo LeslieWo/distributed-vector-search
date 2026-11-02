@@ -6,7 +6,7 @@ import java.util.Map;
 import java.util.TreeMap;
 
 /**
- * Prints ring balance and movement numbers for BUILDLOG step 21: {@code ./gradlew -q :common:ringStats}.
+ * Prints ring balance and movement numbers for step 21: {@code ./gradlew -q :common:ringStats}.
  * Keys are MS MARCO-style chunk ids "{pid}#0".
  */
 public final class RingStats {

@@ -34,7 +34,7 @@ import java.util.concurrent.atomic.AtomicReference;
  * Scatter: one Search per partition of the ring, each sent to one live holder, all in parallel.
  * Gather: wait for all of them (bounded by the query deadline) and merge into the global top-k.
  *
- * <p>Every chunk is in exactly one partition (BUILDLOG step 22), so asking each partition once covers
+ * <p>Every chunk is in exactly one partition (step 22), so asking each partition once covers
  * every vector exactly once. Per partition, a hedged request goes to the other holder when the first one has
  * not answered within the hedge delay (step 34); the first answer wins and the other call is cancelled.
  */
@@ -50,6 +50,8 @@ public final class ScatterGather implements ShardSearcher {
     private final HedgePolicy hedgePolicy; // null = hedging off
     private final HedgeBudget hedgeBudget;
     private volatile boolean cancelHedgeLosers = true;
+    /** A timed-out attempt is retried on the other replica only if at least this much query time is left. */
+    static final long MIN_RETRY_MILLIS = 10;
     private final ScheduledExecutorService timers =
             Executors.newSingleThreadScheduledExecutor(Thread.ofPlatform().name("hedge-timer").daemon().factory());
     private final AtomicReference<ClusterView> lastView = new AtomicReference<>();
@@ -105,7 +107,10 @@ public final class ScatterGather implements ShardSearcher {
 
     @Override
     public Result search(float[] query, int k, Deadline queryDeadline) {
-        Deadline deadline = shardDeadline(queryDeadline); // every partition request shares this budget
+        // Each attempt gets min(query deadline - reserve, now + shard timeout) when it is sent (shardDeadline); the
+        // gather waits until the query deadline - reserve, so an attempt that hits the per-attempt cap can still be
+        // retried on the other replica while the query has time (step 43).
+        Deadline deadline = Deadline.after(Math.max(0, queryDeadline.timeRemaining(TimeUnit.MICROSECONDS) - reserveMicros), TimeUnit.MICROSECONDS);
         ClusterView view = cluster.view();
         if (!view.hasRing()) throw Status.UNAVAILABLE.withDescription("no ring in cluster metadata").asRuntimeException();
         syncChannels(view);
@@ -114,7 +119,7 @@ public final class ScatterGather implements ShardSearcher {
 
         Map<Partition, PartitionCall> calls = new LinkedHashMap<>();
         for (Partition p : view.ring().partitions()) {
-            PartitionCall call = new PartitionCall(p, view, base.setPartition(p.id()).build(), deadline);
+            PartitionCall call = new PartitionCall(p, view, base.setPartition(p.id()).build(), queryDeadline, deadline);
             calls.put(p, call);
             call.start();
         }
@@ -149,17 +154,19 @@ public final class ScatterGather implements ShardSearcher {
         final Partition partition;
         final ClusterView view;
         final ShardSearchRequest request;
-        final Deadline deadline;
+        final Deadline queryDeadline;
+        final Deadline deadline; // query deadline - reserve: no attempt may run past it
         final CompletableFuture<PartitionResult> result = new CompletableFuture<>();
         private final Map<String, ListenableFuture<ShardSearchResponse>> attempts = new LinkedHashMap<>(); // guarded by this
         private final Set<String> failed = new HashSet<>();
         private final List<String> errors = new ArrayList<>();
         private boolean hedgeTimerPending; // guarded by this
 
-        PartitionCall(Partition partition, ClusterView view, ShardSearchRequest request, Deadline deadline) {
+        PartitionCall(Partition partition, ClusterView view, ShardSearchRequest request, Deadline queryDeadline, Deadline deadline) {
             this.partition = partition;
             this.view = view;
             this.request = request;
+            this.queryDeadline = queryDeadline;
             this.deadline = deadline;
             // gave up or timed out: stop every attempt. Winner found: stop the loser only if cancelHedgeLosers (step 41)
             result.whenComplete((r, e) -> {
@@ -227,7 +234,7 @@ public final class ScatterGather implements ShardSearcher {
             long t0 = System.nanoTime();
             stats.started(node);
             ListenableFuture<ShardSearchResponse> call = ShardServiceGrpc.newFutureStub(channels.get(view.address(node)))
-                    .withDeadline(deadline).search(request);
+                    .withDeadline(shardDeadline(queryDeadline)).search(request);
             synchronized (this) {
                 attempts.put(node, call);
                 if (result.isDone()) call.cancel(true); // lost a race with completion
@@ -258,7 +265,11 @@ public final class ScatterGather implements ShardSearcher {
                         failed.add(node);
                         errors.add(node + ": " + status);
                         // retry right away on the other replica (not budgeted: the failed attempt cost the cluster nothing)
-                        retryOn = result.isDone() || status.getCode() == Status.Code.DEADLINE_EXCEEDED ? null : untried();
+                        // DEADLINE_EXCEEDED: retry only if the query still has time (the attempt hit the per-attempt
+                        // shard timeout, not the query deadline)
+                        boolean noTime = status.getCode() == Status.Code.DEADLINE_EXCEEDED
+                                && deadline.timeRemaining(TimeUnit.MILLISECONDS) < MIN_RETRY_MILLIS;
+                        retryOn = result.isDone() || noTime ? null : untried();
                     }
                     if (retryOn != null) {
                         retries.increment();
@@ -286,7 +297,7 @@ public final class ScatterGather implements ShardSearcher {
     }
 
     /**
-     * On a membership change: fresh channels for nodes that come back (ChannelPool.retainOnly, BUILDLOG step 26)
+     * On a membership change: fresh channels for nodes that come back (ChannelPool.retainOnly, step 26)
      * and clear their down marks (their heartbeat returned after it had expired, i.e. they restarted).
      */
     private void syncChannels(ClusterView view) {

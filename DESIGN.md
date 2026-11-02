@@ -43,5 +43,3 @@ Kafka `localhost:9092`, Redis `localhost:6379`, Prometheus 9090, Grafana 3000.
 - Java 21, Spring Boot 3.5.x, Gradle wrapper 8.14.3. JUnit 5, Testcontainers for integration tests.
 - Commit per build step: message `Step N: <summary>`, add files by explicit path (never `git add -A` / `.`), end with `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
 - Never commit data, models, snapshots (`data/`, `*.onnx`, `snapshots/`).
-- Disk is tight (~26 GB free): keep total data+model+snapshots under 12 GB, delete intermediates.
-- Each step appends a section to `BUILDLOG.md`: what was built, key decision + why, rejected alternative, how verified (exact command + result). This is the study material for the quiz later, so write it in plain Chinese.

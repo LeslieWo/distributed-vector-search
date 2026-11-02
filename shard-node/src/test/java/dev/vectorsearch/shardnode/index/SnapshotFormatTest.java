@@ -8,7 +8,7 @@ import java.io.ByteArrayOutputStream;
 import java.util.Random;
 import org.junit.jupiter.api.Test;
 
-/** Compact snapshot formats (BUILDLOG step 37): sizes, round trip, old snapshots still load, dedupe after fp16. */
+/** Compact snapshot formats (step 37): sizes, round trip, old snapshots still load, dedupe after fp16. */
 class SnapshotFormatTest {
     static final int DIM = 384;
 

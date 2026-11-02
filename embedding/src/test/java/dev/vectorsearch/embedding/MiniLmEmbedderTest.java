@@ -56,7 +56,7 @@ class MiniLmEmbedderTest {
         float[] inBatch = embedder.embed(List.of(longText, shortText))[1];
         float maxDiff = 0f;
         for (int i = 0; i < alone.length; i++) maxDiff = Math.max(maxDiff, Math.abs(alone[i] - inBatch[i]));
-        // Not bit-identical: padding changes the shapes onnxruntime computes with (see BUILDLOG step 18).
+        // Not bit-identical: padding changes the shapes onnxruntime computes with (see step 18).
         System.out.printf("alone vs padded-in-batch max abs diff = %.3e, bit-identical = %b%n", maxDiff, java.util.Arrays.equals(alone, inBatch));
         assertArrayEquals(alone, inBatch, 1e-4f);
 
@@ -83,7 +83,7 @@ class MiniLmEmbedderTest {
 
     /**
      * reference_vectors.tsv was produced by sentence-transformers 6.2.0 / torch 2.14.1 (PyTorch, not ONNX)
-     * with {@code encode(..., normalize_embeddings=True)}; see BUILDLOG step 13.
+     * with {@code encode(..., normalize_embeddings=True)}; see step 13.
      */
     @Test
     void matchesSentenceTransformersReference() throws Exception {
